@@ -1,0 +1,169 @@
+# 02 — Architecture
+
+## 1. Tech stack
+
+| Layer | Choice | Rationale |
+|---|---|---|
+| Language | Kotlin | Current Android standard |
+| UI | Jetpack Compose + Material 3, orientation/`WindowSizeClass` layouts | Standard; one composable set, two arrangements |
+| Media | **Media3 ExoPlayer** (`media3-exoplayer`, `media3-ui`, `media3-session`, `media3-datasource`, `media3-common`) | Speed/pitch, `SeekParameters`, `CacheDataSource`, `DefaultAudioSink` processor chain |
+| YouTube extraction | **NewPipe Extractor (primary)**, `youtubedl-android`/yt-dlp (fallback spike) | Pure-Java, tiny, yields progressive URLs; yt-dlp as resilient backup (§5 D2) |
+| DI | Hilt | Standard |
+| Persistence | Room (tracks, presets), DataStore (settings) | Standard |
+| Async | Kotlin coroutines + Flow | Standard |
+| Build | Gradle Kotlin DSL, version catalog (`libs.versions.toml`) | Standard |
+
+- `minSdk 26` (confirmed), `targetSdk` latest.
+- Single Gradle module (`:app`), package-by-feature. Split later only if it grows.
+
+## 2. Package layout (package-by-feature)
+
+```
+com.tracktrainer
+├── app/            # Application, navigation, MainActivity
+├── data/           # Room DB, DataStore, repositories
+│   ├── local/      # entities, DAOs
+│   └── repo/       # TrackRepository, PresetRepository, SettingsRepository
+├── player/         # ExoPlayer wrapper, speed/seek/frame-step, preset application
+├── cache/          # CacheDataSource wiring, cache key factory, cache manager
+├── youtube/        # extractor interface, NewPipe impl, yt-dlp impl (spike)
+├── loop/           # A-B loop controller (position polling, seam fade)
+├── countin/        # count-in scheduling + overlay state
+├── metronome/      # click synthesis, scheduling, AudioProcessor chain
+├── taptempo/       # tap capture → BPM/phase derivation
+├── volume/         # gain + limiter AudioProcessor, per-device profiles
+└── ui/
+    ├── study/      # portrait control surface
+    ├── focus/      # landscape HUD
+    └── shared/     # shared composables (transport bar, tap pad, overlay)
+```
+
+## 3. Core pipelines
+
+### 3.1 Sources → one playback pipeline (F1/F2/F16)
+
+Three add-track sources (chooser UX: 01-product-overview §5.1). The two URL sources share everything downstream of URL resolution — they are adapters, not separate features:
+
+```
+LOCAL                          YOUTUBE                      DIRECT URL
+SAF content:// URI             watch URL                    stream URL
+takePersistableUriPermission   │                           │
+(never copied — D11)           ▼                            │
+                        Extractor (NewPipe / yt-dlp) ◄── adapter
+                               │ resolves progressive       │
+                               │ URL (≤720p, expires ~6h)   │
+                               ▼                            ▼
+                        CacheDataSource(SimpleCache, CacheKeyFactory = stable key)
+                               │   read-through: streams while writing disk cache
+                               ▼
+                          ExoPlayer
+```
+
+- **Stable cache keys:** YouTube → `videoId + itag`; Direct URL → `SHA-256(url)` normalized (strip volatile query params where safe). **Never the full URL** for YouTube (expires ~6h → default keys would miss on every replay).
+- **No download UI.** Offline state = subtle indicator only; optional hidden "keep offline" pin uses Media3 `DownloadService` in background.
+- Eviction: `SimpleCache` LRU. **No size cap initially** — owner decision: start unconstrained and add a cache-size setting when real usage shows a need (Phase 7+). Pinned tracks exempt from eviction.
+- **Local (reference in place, D11):** `content://` URI + `takePersistableUriPermission`, stored on the `Track` row. No copying — keeping the file available is the user's responsibility (01-product-overview non-goals). Health check on open: unreadable/revoked reference → track flagged *"file missing — re-link"* (re-pick the file), never a crash. Cloud-provider source (Drive etc.) → one-time offline warning. Note: persisted grants have a documented per-app cap (~128) — relevant only for huge local libraries.
+- **Format constraint:** progressive (muxed A/V) formats only, default 720p (tabs legible, halves storage). 1080p+ DASH requires muxing — V2.
+
+### 3.2 Playback (F1/F3/F4/F10)
+
+- Speed: `PlaybackParameters(speed = 0.25f..2f)` — Media3 time-stretches with pitch preserved (verify on device; Sonic-based processing can artifact <0.5×).
+- Transpose: `PlaybackParameters.pitch` (±12 semitones) — independent of speed.
+- Accurate A/B seeks: `SeekParameters.CLOSEST_SYNC` for seeks to A.
+- Frame step: pause + `seekTo(current ± frameDurationUs)`; container frame duration where known, else ~33 ms fallback.
+
+### 3.3 A-B loop (F5)
+
+- ExoPlayer has **no built-in loop**. Coroutine polls `player.currentPosition` every ~30–50 ms; when ≥ B → `seekTo(A)`.
+- Expected accuracy ±50–100 ms (acceptable); seam masked with ~5 ms fade to avoid pops.
+- Loop points stored per track; multiple named points; repeat-count support.
+
+### 3.4 Count-in (F6) — hybrid design
+
+**Constraint:** during count-in the player is *paused* (video frozen on the tab), so the sink's pipeline isn't running — the sample-accurate processor cannot emit clicks while paused.
+
+```
+tap Loop (count = 4)
+  → player paused at A (frame frozen)
+  → overlay shows 4…3…2…1, clicks via standalone AudioTrack
+  → on final tick: overlay fades, player.play()
+```
+
+- Click scheduling + animation share **one absolute time base** (`elapsedRealtimeNanos`); animation offset by measured output latency (~20–50 ms) so numerals flip when the click is *heard*.
+- One-shot start alignment needs no sample accuracy — measured offset + user nudge (±10 ms) compensates.
+
+### 3.5 Metronome (F8) — sample-accurate mix
+
+```
+decoded PCM ──► [volume boost] ──► [click mix] ──► device
+                own AudioProcessor   own AudioProcessor
+                 (§3.6)              (sample-exact, from player position)
+```
+
+- Custom `AudioProcessorChain` injected via `DefaultAudioSink.Builder().setAudioProcessorChain(...)`.
+- Click processor receives scheduled events (position → sample index); because it processes the player's own stream, position-to-sample mapping is exact → **zero drift**.
+- Click synthesis: short PCM one-shots (stick/hi-hat), configurable BPM/time-signature/subdivision/accent/volume, phase nudge ±ms.
+- Never `SoundPool`/`MediaPlayer` for clicks (unpredictable latency).
+
+### 3.6 Volume boost (F9)
+
+- Gain stage inside the sink processor chain (before click mix): 0…+18 dB, multiply in float PCM.
+- **Soft limiter** after gain — mandatory; beyond 0 dBFS is clipping. `tanh()` soft-clip is the simple baseline (reference: F-Droid *lissen* app's gain+limiter via `DynamicsProcessing`).
+- Order: boost **before** click mix so the metronome stays at fixed comfortable level regardless of track boost.
+- Per-output-device profile (headphones get boost; speaker does not).
+- Rejected alternative: `LoudnessEnhancer` audio effect — cruder, OEM-dependent, and the chain exists anyway (D6).
+- Honest limits: an already-loud master boosted hard will pump; the win is quiet sources (high-Z headphone use case).
+
+### 3.7 Tap tempo (F7)
+
+- Tap timestamps (`SystemClock.nanoTime`) captured alongside a `player.currentPosition` snapshot.
+- Median of inter-tap intervals → BPM; discard outlier taps; detect half/double tempo; 4-tap grouping detection for per-bar tapping.
+- Phase = offset of tap grid vs player position. Human reaction bias (~30–50 ms late) is accepted and corrected via the **nudge control**, not algorithmically.
+- Result stored as `bpm + offsetMs` per track / per loop point.
+
+### 3.8 Extraction failure fallback ladder
+
+When a YouTube video won't resolve, work down the ladder — every rung preserves the full feature set:
+
+1. **Cache hit** — previously viewed videos replay from `SimpleCache` with *no extraction at all* (stable key) ✅
+2. **NewPipe fails → yt-dlp fallback** (prepared behind the `youtube/Extractor` interface; activated by gate G1) ✅
+3. **Both broken transiently** — yt-dlp upstream typically fixes within days; sideload model → update APK ✅
+4. **Still stuck → direct media URL paste** (add-track option 3, e.g. desktop `yt-dlp -g <link>`) → same `CacheDataSource` pipeline ✅
+5. **Nuclear → local file import** — download/transfer the file, reference it ✅
+
+**Rejected fallback: WebView / embedded YouTube player (D9).** WebView audio bypasses `DefaultAudioSink`, so caching, metronome mix, and volume boost all become impossible — it would be a second, feature-poor player to maintain. The ladder above strictly dominates it.
+
+## 4. Data model (Room)
+
+```
+Track       { id, sourceType(LOCAL|YOUTUBE|DIRECT), sourceRef, title,
+              youtubeId?, durationMs, thumbnailPath?, offline(bool), pinned(bool),
+              needsRefresh(bool), cacheBytes, lastPlayedAt }
+              // LOCAL: sourceRef = SAF content:// URI (reference, never copied);
+              //        offline = on-device file check, needsRefresh unused
+              // YOUTUBE: sourceRef = watch URL; needsRefresh = re-extract needed
+              // DIRECT: needsRefresh = cached copy gone AND URL expired → prompt re-paste
+LoopPoint   { id, trackId, label, positionA, positionB }
+Preset      { id, trackId, speed, transpose, bpm?, tapOffsetMs?,
+              countInClicks, countInBars, clickSound, clickVolume,
+              boostDb, ... }        // one per track (with defaults)
+Settings    { defaultQuality, alwaysPinOpened, ... }  // DataStore
+            // cacheMaxBytes: intentionally absent — no cap for now; add when needed
+```
+
+## 5. Key decisions (ADR-style)
+
+| # | Decision | Status | Notes |
+|---|---|---|---|
+| D1 | Distribution = sideload, personal use | Accepted | Removes Play Store policy constraints entirely |
+| D2 | NewPipe Extractor primary, yt-dlp fallback | **To validate (spike)** | Decision gate: Phase 2 spike results |
+| D3 | 720p progressive quality ceiling for V1 | Accepted | Avoids A/V muxing; tabs legible |
+| D4 | Transparent `CacheDataSource` caching, no download UI | Accepted | Read-through; stable cache keys |
+| D5 | Hybrid count-in (parallel AudioTrack while paused) + sample-accurate continuous metronome (sink processor) | Accepted | Forced by frozen-frame constraint |
+| D6 | Volume boost in sink chain, not `LoudnessEnhancer` | Accepted | Chain exists for metronome anyway |
+| D7 | Single module, package-by-feature | Accepted | Split only if needed |
+| D8 | minSdk 26 | Confirmed by owner | |
+| D9 | **No WebView/embedded-player fallback** for extraction failure | Accepted | Bypasses the audio pipeline (cache, metronome, boost) — feature-poor second player; use fallback ladder §3.8 instead |
+| D10 | **3 explicit add-track options** (local / YouTube / direct URL), no auto-detect paste | Accepted | Modes differ in expiry & offline semantics; explicit is debuggable (personal app) |
+| D11 | **Local files referenced in place, never copied** | Accepted (owner) | No storage duplication; user owns file placement — broken reference = re-link, not an app bug |
+
