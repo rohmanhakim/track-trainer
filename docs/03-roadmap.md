@@ -24,6 +24,10 @@ V2 icebox items (see 01-product-overview §4.2) are groomed only after Phase 7.
 
 ## 3. Phase 1 — Minimal Player *(minimal deliverables)*
 
+**Session-level task breakdown:** [`docs/tasks/phase-1.md`](tasks/phase-1.md) —
+7 focused sessions (T01–T07), each with scope + acceptance + notes. That file tracks
+execution status; this section remains the scope authority.
+
 **Goal:** the smallest thing that is genuinely useful: *play a lesson video at any speed.* Everything later builds on this skeleton (navigation, player wrapper, layout system, Room).
 
 **Deliverables**

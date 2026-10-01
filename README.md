@@ -13,6 +13,7 @@ A personal-use Android app for practicing guitar with video tracks: variable-spe
 | [docs/02-architecture.md](docs/02-architecture.md) | Tech stack, module layout, audio/video pipelines, data model, key decisions |
 | [docs/03-roadmap.md](docs/03-roadmap.md) | Agile phase plan: Phase 1 = minimal deliverable, stories + acceptance criteria per phase |
 | [docs/04-risks.md](docs/04-risks.md) | Risk register with mitigations |
+| [docs/tasks/phase-1.md](docs/tasks/phase-1.md) | Phase 1 session task checklist (T01–T07) — current execution status |
 
 ## Constraints
 
