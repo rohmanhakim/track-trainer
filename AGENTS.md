@@ -19,11 +19,14 @@ speed control, A-B loop, animated count-in, tap-tempo metronome, volume boost.
 
 ## Current status
 
-- **Phase: documentation complete, implementation not started.**
-- Phase 1 (Minimal Player) is the first implementation phase — do not start it
-  unless the owner explicitly asks.
-- When implementation begins, follow `docs/03-roadmap.md`: one phase at a time,
-  stories + acceptance criteria, Definition of Done applies (§10).
+- **Phase 1 prep: empty scaffold generated** (Android Studio template — Views/AppCompat,
+  no launcher activity, sources dir empty). Docs complete.
+- **First Phase 1 task:** convert the template to the documented stack — Compose + M3
+  (MainActivity + launcher intent), add missing deps to `libs.versions.toml`
+  (Media3, Hilt, Room, DataStore, coroutines/Flow, Compose BOM), Hilt `Application`.
+  See `docs/03-roadmap.md` Phase 1 S1 for the full remaining checklist.
+- Then follow `docs/03-roadmap.md`: one phase at a time, stories + acceptance
+  criteria, Definition of Done applies (§10).
 
 ## Hard rules
 
@@ -42,23 +45,38 @@ speed control, A-B loop, animated count-in, tap-tempo metronome, volume boost.
 
 ## Build & test commands
 
-*(To be filled when the project scaffold exists — Phase 1. Update this section
-as soon as Gradle files land.)*
+Gradle 9.5.0 / AGP 9.3.3, configuration cache enabled (first build is slow —
+subsequent ones are not). `local.properties` is machine-specific — never commit it.
+
+**Environment: no system Java.** Prefix Gradle with Android Studio's bundled JBR:
 
 ```bash
-# Build
+export JAVA_HOME=/home/arif/android-studio/jbr   # add to ~/.bashrc to make permanent
+```
+
+```bash
+# Build              ✓ verified BUILD SUCCESSFUL (7 s, config cache warm)
 ./gradlew assembleDebug
-# Unit tests
+# Unit tests         ✓ verified BUILD SUCCESSFUL
 ./gradlew testDebugUnitTest
-# Lint
+# Instrumented tests (device required — not run yet)
+./gradlew connectedDebugAndroidTest
+# Lint               ✓ verified BUILD SUCCESSFUL (first run downloads ~100 MB of
+#                    lint jars from dl.google.com — takes minutes, may need retry)
 ./gradlew lintDebug
-# Install on connected device
+# Install on connected device (requires owner's device)
 ./gradlew installDebug
 # Docs are markdown-only — no build
 ```
 
 ## Conventions
 
+- **Project facts:** namespace/applicationId `io.github.rohmanhakim.tracktrainer`;
+  source root `app/src/main/java/`; single `:app` module; R8 keep rules live in
+  `app/src/main/keepRules/` (AGP combines them automatically).
+- **Toolchain:** AGP 9.3.3 built-in Kotlin (no separate Kotlin Gradle plugin) —
+  adding Compose requires the `org.jetbrains.kotlin.plugin.compose` plugin;
+  Hilt/Room use KSP. compileSdk 37 / targetSdk 36 / minSdk 26 / Java 11.
 - Kotlin idioms: immutability for UI state, `Flow` for streams, sealed interfaces
   for events/state, no Javadoc-style noise — comment the *why* only.
 - Package-by-feature per `02-architecture` §2; keep new features inside their

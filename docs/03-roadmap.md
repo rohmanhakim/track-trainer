@@ -27,7 +27,12 @@ V2 icebox items (see 01-product-overview §4.2) are groomed only after Phase 7.
 **Goal:** the smallest thing that is genuinely useful: *play a lesson video at any speed.* Everything later builds on this skeleton (navigation, player wrapper, layout system, Room).
 
 **Deliverables**
-- Project scaffold: Gradle KDL + version catalog, Hilt, Compose + Material 3, single module, package-by-feature skeleton (02-architecture §2).
+- ✅ **Scaffold exists** (Android Studio empty template: Gradle 9.5 / AGP 9.3.3, `:app`, minSdk 26 — see 02-architecture §1.1).
+- **S1 (remaining scaffold work):** convert template → documented stack:
+  - Views/AppCompat → **Compose + Material 3** (add Compose BOM + `kotlin.plugin.compose` plugin; MainActivity + launcher intent in the manifest — currently no activity exists; M3 theme replacing `themes.xml`).
+  - Version catalog additions: Media3 (exoplayer/ui/session/datasource), Hilt (+ KSP), Room (+ KSP), DataStore, coroutines/Flow, Compose BOM/M3.
+  - Hilt `Application` class; package-by-feature skeleton (02-architecture §2) under `io.github.rohmanhakim.tracktrainer`.
+  - Remove now-unused View-template deps (appcompat/material XML) if nothing references them.
 - Local video **reference** (SAF picker → `takePersistableUriPermission`, no copy) + Room `Track` table + a trivial library screen (list of tracks).
 - Player screen: ExoPlayer surface, play/pause, seek bar, position/duration.
 - Speed control 0.25×–2× (chips + slider), pitch verified preserved.
@@ -47,7 +52,7 @@ V2 icebox items (see 01-product-overview §4.2) are groomed only after Phase 7.
 
 **Explicitly NOT in Phase 1:** YouTube, caching, loop, count-in, metronome, boost, presets, PiP, MediaSession.
 
-**Sprint example:** S1 scaffold + import + library; S2 player surface + transport; S3 speed + adaptive layouts + on-device verification.
+**Sprint example:** S1 stack conversion (Compose/Hilt/deps) + reference import + library; S2 player surface + transport; S3 speed + portrait layout + on-device verification.
 
 ## 4. Phase 2 — YouTube + Direct URL + Offline Cache
 

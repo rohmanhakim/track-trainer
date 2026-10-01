@@ -2,7 +2,7 @@
 
 A personal-use Android app for practicing guitar with video tracks: variable-speed playback, A-B looping, count-in, tap-tempo metronome, and transparent offline caching of YouTube videos.
 
-**Status:** Planning — documentation only, no implementation yet.
+**Status:** Docs complete; Phase 1 scaffold generated (empty Android Studio template — first task is converting it to the Compose stack, see roadmap Phase 1 S1).
 
 ## Documentation
 
