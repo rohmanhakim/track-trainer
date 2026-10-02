@@ -19,7 +19,7 @@ and per-session status/notes.
 
 | # | Task | Status | Roadmap stories |
 |---|---|---|---|
-| T01 | Compose foundation | not-started | S1 checklist |
+| T01 | Compose foundation | in-progress | S1 checklist |
 | T02 | Dependencies + Hilt + Room skeleton | not-started | S1 checklist |
 | T03 | Library screen + local reference | not-started | P1-1 |
 | T04 | Missing-file detection & re-link | not-started | P1-1a |
@@ -35,7 +35,7 @@ command needs `export JAVA_HOME=/home/arif/android-studio/jbr` (AGENTS.md).
 
 ## T01 — Compose foundation
 
-**Status:** not-started · **Depends on:** — · **Stories:** S1 checklist (partial)
+**Status:** in-progress · **Depends on:** — · **Stories:** S1 checklist (partial)
 
 ### Goal
 Convert the generated Views/AppCompat template into a launchable Compose + M3 app:
@@ -62,13 +62,37 @@ placeholder screen, correct theme, dead template code gone.
 - Keep `keepRules/` and existing test dirs untouched.
 
 ### Acceptance
-- [ ] `./gradlew assembleDebug` green
-- [ ] `testDebugUnitTest` + `lintDebug` green
+- [x] `./gradlew assembleDebug` green
+- [x] `testDebugUnitTest` + `lintDebug` green
 - [ ] Installs and launches on device showing a placeholder M3 screen
-- [ ] No `appcompat`/`material` warnings for unused template deps
+- [x] No `appcompat`/`material` warnings for unused template deps
 
 ### Session notes
-_(pending)_
+
+**Code + build done 2026-10-02; only the on-device launch check remains.**
+
+- **Versions:** Compose BOM `2026.09.00` (Compose 1.12 / M3 1.4.0), `activity-compose 1.13.0`,
+  compose plugin **`2.2.10`** = the KGP bundled with AGP 9.3.3 (verified from the AGP POM on
+  Google Maven). KGP 2.2.10 compiled the 2026.09 BOM cleanly — planned fallback (explicit
+  KGP bump) was **not** needed.
+- **Files:** version catalog + `app/build.gradle.kts` (compose plugin alias,
+  `buildFeatures { compose = true }`, BOM platform, appcompat/material removed);
+  `app/MainActivity.kt` (edge-to-edge + placeholder screen); `ui/theme/Theme.kt` (static M3
+  light/dark, no dynamic color); manifest activity `.app.MainActivity` (exported, LAUNCHER,
+  portrait lock); XML themes re-parented to `android:Theme.Material.*.NoActionBar` (required —
+  the MaterialComponents parent would crash once the `material` dep was removed);
+  `colors.xml` deleted (unreferenced after theme rewrite).
+- **Deviation:** task text says `.MainActivity`; architecture §2 puts MainActivity in the
+  `app/` feature package → used **`.app.MainActivity`** (package-by-feature is the hard rule).
+- **Builds:** first `assembleDebug` 3m 50s (dependency downloads + config-cache store, cold);
+  `testDebugUnitTest` + `lintDebug` 20s warm. Lint: **0 errors, 6 warnings**, all expected —
+  targetSdk 36→37 (docs pin 36), Gradle 9.5→9.8 / AGP 9.3.3→9.4.1 / core-ktx 1.19.1 /
+  compose-plugin 2.4.20 "newer available" (versions deliberately pinned — no churn mid-task),
+  portrait-lock pair `LockedOrientationActivity` + `DiscouragedApi` (required by T01).
+- ⚠️ **Note for T07:** `DiscouragedApi` warns fixed orientations are ignored on Android 16+
+  — the portrait lock may be a no-op on new devices; adaptive layout (T07) is the real answer.
+- ⏳ **Pending:** `./gradlew installDebug` + launch on physical device (none connected at
+  session time — owner task). Check placeholder screen in light *and* dark mode.
 
 ---
 
