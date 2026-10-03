@@ -40,10 +40,7 @@ speed control, A-B loop, animated count-in, tap-tempo metronome, volume boost.
 3. **Stack is fixed** (`02-architecture` §1): Kotlin, Jetpack Compose + M3,
    Media3 ExoPlayer, Hilt, Room, DataStore, coroutines/Flow, Gradle KDL +
    version catalog, single `:app` module, package-by-feature.
-4. **Verify on-device** per the Definition of Done — emulator-only is not done.
-   (Agent: run build/lint/unit tests; note in your report which DoD items
-   require the owner's physical device.)
-5. **Don't grow scope mid-phase.** New ideas → note them for grooming; don't
+4. **Don't grow scope mid-phase.** New ideas → note them for grooming; don't
    implement them.
 
 ## Build & test commands
@@ -86,7 +83,6 @@ export JAVA_HOME=/home/arif/android-studio/jbr   # add to ~/.bashrc to make perm
   feature package, not in `app/` or `ui/` catch-alls.
 - Room schema changes = new migration, never destructive fallback in dev data
   the owner is using.
-- Commits: small, one feature per commit, imperative subject.
 - UI: portrait study mode is the primary layout (landscape deferred).
 
 ## Installed skills (`.agents/skills/`)

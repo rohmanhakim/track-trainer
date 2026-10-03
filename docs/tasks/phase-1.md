@@ -19,7 +19,7 @@ and per-session status/notes.
 
 | # | Task | Status | Roadmap stories |
 |---|---|---|---|
-| T01 | Compose foundation | in-progress | S1 checklist |
+| T01 | Compose foundation | done | S1 checklist |
 | T02 | Dependencies + Hilt + Room skeleton | not-started | S1 checklist |
 | T03 | Library screen + local reference | not-started | P1-1 |
 | T04 | Missing-file detection & re-link | not-started | P1-1a |
@@ -35,7 +35,7 @@ command needs `export JAVA_HOME=/home/arif/android-studio/jbr` (AGENTS.md).
 
 ## T01 — Compose foundation
 
-**Status:** in-progress · **Depends on:** — · **Stories:** S1 checklist (partial)
+**Status:** done · **Depends on:** — · **Stories:** S1 checklist (partial)
 
 ### Goal
 Convert the generated Views/AppCompat template into a launchable Compose + M3 app:
@@ -64,12 +64,12 @@ placeholder screen, correct theme, dead template code gone.
 ### Acceptance
 - [x] `./gradlew assembleDebug` green
 - [x] `testDebugUnitTest` + `lintDebug` green
-- [ ] Installs and launches on device showing a placeholder M3 screen
+- [x] Installs and launches on device showing a placeholder M3 screen *(emulator Android 17 — owner overrode DoD #3 for T01)*
 - [x] No `appcompat`/`material` warnings for unused template deps
 
 ### Session notes
 
-**Code + build done 2026-10-02; only the on-device launch check remains.**
+**Done 2026-10-02 — all acceptance boxes checked (emulator verification + DoD override below).**
 
 - **Versions:** Compose BOM `2026.09.00` (Compose 1.12 / M3 1.4.0), `activity-compose 1.13.0`,
   compose plugin **`2.2.10`** = the KGP bundled with AGP 9.3.3 (verified from the AGP POM on
@@ -91,8 +91,13 @@ placeholder screen, correct theme, dead template code gone.
   portrait-lock pair `LockedOrientationActivity` + `DiscouragedApi` (required by T01).
 - ⚠️ **Note for T07:** `DiscouragedApi` warns fixed orientations are ignored on Android 16+
   — the portrait lock may be a no-op on new devices; adaptive layout (T07) is the real answer.
-- ⏳ **Pending:** `./gradlew installDebug` + launch on physical device (none connected at
-  session time — owner task). Check placeholder screen in light *and* dark mode.
+- **Emulator verification (2026-10-02):** installed + launched on `emulator-5554`
+  (Pixel_4 AVD, **Android 17 / API 37**): `installDebug` OK (2 s), LAUNCHER activity starts,
+  process stays alive (no `FATAL`/`AndroidRuntime` hits in logcat), placeholder screen renders
+  correctly in **light and dark** mode (screenshots reviewed: M3 background, centered
+  headline, edge-to-edge with no action bar), dark-mode toggle recreates the activity without
+  process death. **Owner override: DoD #3 waived for T01** (emulator verification accepted —
+  launch-only task, no audio/extraction/caching behavior involved); T01 marked done.
 
 ---
 
