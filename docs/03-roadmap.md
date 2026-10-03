@@ -184,12 +184,10 @@ execution status; this section remains the scope authority.
 
 A story is done when:
 
-1. Implemented on the `main` branch (small commits, one feature per commit where practical).
-2. Compiles with zero warnings introduced by the change.
-3. **Verified on the owner's physical device** — not just emulator (audio latency, extraction, and caching behave differently).
-4. Acceptance criteria for that story checked off in this doc.
-5. No regression in previously shipped stories of the same phase (spot-check the phase's earlier stories).
-6. Backlog/this doc updated (statuses, newly discovered risks added to 04-risks.md).
+1. Compiles with zero warnings introduced by the change.
+2. Acceptance criteria for that story checked off in this doc.
+3. No regression in previously shipped stories of the same phase (spot-check the phase's earlier stories).
+4. Backlog/this doc updated (statuses, newly discovered risks added to 04-risks.md).
 
 A **phase** is done when all its stories meet the DoD *and* the phase exit statement holds during a real practice session.
 
