@@ -20,7 +20,7 @@ and per-session status/notes.
 | # | Task | Status | Roadmap stories |
 |---|---|---|---|
 | T01 | Compose foundation | done | S1 checklist |
-| T02 | Dependencies + Hilt + Room skeleton | not-started | S1 checklist |
+| T02 | Dependencies + Hilt + Room skeleton | done | S1 checklist |
 | T03 | Library screen + local reference | not-started | P1-1 |
 | T04 | Missing-file detection & re-link | not-started | P1-1a |
 | T05 | Player core | not-started | P1-2, P1-5 |
@@ -103,7 +103,7 @@ placeholder screen, correct theme, dead template code gone.
 
 ## T02 — Dependencies + Hilt + Room skeleton
 
-**Status:** not-started · **Depends on:** T01 · **Stories:** S1 checklist (partial)
+**Status:** done · **Depends on:** T01 · **Stories:** S1 checklist (partial)
 
 ### Goal
 All Phase 1 libraries land in the version catalog, Hilt is wired up, and the Room
@@ -129,12 +129,53 @@ All Phase 1 libraries land in the version catalog, Hilt is wired up, and the Roo
   schema path decisions go in session notes.
 
 ### Acceptance
-- [ ] All deps resolve; `assembleDebug` green
-- [ ] `testDebugUnitTest` + `lintDebug` green
-- [ ] On device: app launches (Hilt Application active, no DI crash) and DB file is created
+- [x] All deps resolve; `assembleDebug` green
+- [x] `testDebugUnitTest` + `lintDebug` green
+- [x] On device: app launches (Hilt Application active, no DI crash) and DB file is created *(emulator-5554 — owner approved emulator for T02: "emulator is enough for now")*
 
 ### Session notes
-_(pending)_
+
+**Done 2026-10-03 — all acceptance boxes checked (emulator verification, owner-approved).**
+
+- **Versions pinned (all latest stable at session time):** KSP **2.3.12**, Hilt **2.60.1**,
+  Room **2.8.5**, DataStore **1.2.1**, coroutines **1.11.0**, lifecycle **2.11.0**,
+  Media3 **1.11.1**. DataStore + Media3 land declared-but-unused per S1 (first wired
+  T05 / later). Compose BOM unchanged (no churn rule).
+- **KSP under AGP 9 built-in Kotlin:** KSP decoupled its versioning from Kotlin at 2.3.0;
+  **≥2.3.1 required for AGP 9 built-in Kotlin** (2.3.4+ recommended per JetBrains
+  AGP-9 compat doc); old `-2.0.x` suffix = deprecated KSP1. Pinned 2.3.12 via catalog
+  alias — **worked out of the box**: no `android.disallowKotlinSourceSets=false`,
+  no buildscript classpath override needed.
+- **Hilt:** plugin + `hilt-android`/`hilt-android-compiler` (KSP); `@HiltAndroidApp`
+  `TrackTrainerApplication` in `app/`, manifest `android:name=".app.TrackTrainerApplication"`.
+  The known Hilt 2.59 AGP-9/Jetifier `hiltJavaCompile` bug does not apply (jetifier
+  never enabled in this project).
+- **Room:** `androidx.room` Gradle plugin + `room { schemaDirectory("$projectDir/schemas") }`
+  — schema export **enabled and committed** (owner decision #1). Output:
+  `app/schemas/io.github.rohmanhakim.tracktrainer.data.local.AppDatabase/1.json`.
+  AGP 9.3.3 + Room 2.8.5 plugin: no issues.
+- **Track entity:** follows 02-architecture §4 **including `youtubeId`** — the task's
+  field list omits it, but §4 has it; included now to avoid an early migration since
+  schema v1 is already committed. Enum `SourceType { LOCAL, YOUTUBE, DIRECT }` +
+  `TypeConverter`. DAO skeleton: `observeAll(): Flow`, `insert`, `count`.
+- **Smoke bootstrap (deliberate):** Room creates its DB lazily and T02 has no UI to
+  touch it, so `TrackTrainerApplication` injects `TrackDao` and runs `count()` on an
+  unscoped `CoroutineScope(SupervisorJob() + Dispatchers.IO)` in `onCreate` — proves
+  Hilt wiring + Room file creation in one launch. T03 may replace it once
+  `TrackRepository` exists.
+- **Skeleton:** `data/local/` (Track, Converters, TrackDao, AppDatabase, DatabaseModule),
+  `data/repo/`, `player/`, `library/` placeholders via `.gitkeep` (git ignores empty
+  dirs); `app/` + `ui/` already existed. Note: `library/` isn't in 02-architecture §2's
+  tree — added because this task mandates it (feature package for T03).
+- **Builds:** first `assembleDebug` **5m 28s** (cold: KSP/Hilt/Room/Media3 downloads +
+  config-cache re-store after daemon JVM change); warm `testDebugUnitTest` 6s,
+  `lintDebug` 17s. Lint: **0 errors, 7 warnings — the same T01-era set** (OldTargetApi
+  36, Gradle 9.5→9.8, AGP 9.3.3→9.4.1, core-ktx 1.19.1, compose-plugin 2.4.20,
+  LockedOrientationActivity + DiscouragedApi); **zero warnings introduced by T02**.
+- **Emulator verification (2026-10-03):** `installDebug` OK; `am start` → process alive
+  (stable pid), **no FATAL/AndroidRuntime hits** in logcat; smoke log
+  `TrackTrainer: Track DB ready, tracks=0` (Hilt injection + Room query executed);
+  `run-as … ls databases/` → `track-trainer.db` (+ `-shm`/`-wal`) created.
 
 ---
 
