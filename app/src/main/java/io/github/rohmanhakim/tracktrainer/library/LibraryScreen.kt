@@ -23,7 +23,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -43,13 +46,22 @@ fun LibraryScreen(
     modifier: Modifier = Modifier,
     viewModel: LibraryViewModel = viewModel(),
 ) {
-    val tracks by viewModel.tracks.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     // SAF picker: reference-only pick, no copy (D11); launcher must outlive recomposition.
+    // pendingRelinkId routes the pick: null = add new track, set = re-link that row;
+    // cleared before dispatch so a cancelled pick can't hijack the next add.
+    var pendingRelinkId by rememberSaveable { mutableStateOf<Long?>(null) }
     val pickLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
-    ) { uri -> uri?.let(viewModel::addTrack) }
+    ) { uri ->
+        val relinkId = pendingRelinkId
+        pendingRelinkId = null
+        if (uri != null) {
+            if (relinkId != null) viewModel.relinkTrack(relinkId, uri) else viewModel.addTrack(uri)
+        }
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.messages.collect { snackbarHostState.showSnackbar(it) }
@@ -69,7 +81,7 @@ fun LibraryScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
-        if (tracks.isEmpty()) {
+        if (uiState.tracks.isEmpty()) {
             EmptyLibrary(
                 onAddTrack = { pickLauncher.launch(VIDEO_MIME_TYPES) },
                 modifier = Modifier
@@ -83,8 +95,15 @@ fun LibraryScreen(
                     .padding(padding),
                 contentPadding = PaddingValues(vertical = 8.dp),
             ) {
-                items(tracks, key = { it.id }) { track ->
-                    TrackRow(track)
+                items(uiState.tracks, key = { it.id }) { track ->
+                    TrackRow(
+                        track = track,
+                        missing = track.id in uiState.missingIds,
+                        onRelink = {
+                            pendingRelinkId = track.id
+                            pickLauncher.launch(VIDEO_MIME_TYPES)
+                        },
+                    )
                     HorizontalDivider()
                 }
             }
@@ -93,17 +112,33 @@ fun LibraryScreen(
 }
 
 @Composable
-private fun TrackRow(track: Track) {
+private fun TrackRow(track: Track, missing: Boolean, onRelink: () -> Unit) {
     ListItem(
         headlineContent = {
             Text(track.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
         },
-        supportingContent = if (track.durationMs > 0L) {
+        supportingContent = {
+            Column {
+                if (missing) {
+                    Text(
+                        text = stringResource(R.string.library_missing),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (track.durationMs > 0L) {
+                    Text(
+                        text = formatDuration(track.durationMs),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        trailingContent = if (missing) {
             {
-                Text(
-                    text = formatDuration(track.durationMs),
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                TextButton(onClick = onRelink) {
+                    Text(stringResource(R.string.library_relink))
+                }
             }
         } else {
             null

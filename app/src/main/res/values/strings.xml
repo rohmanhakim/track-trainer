@@ -2,4 +2,6 @@
     <string name="app_name">TrackTrainer</string>
     <string name="library_add_track">Add track</string>
     <string name="library_empty">No tracks yet\nPick a local video to get started</string>
+    <string name="library_missing">⚠️ File missing</string>
+    <string name="library_relink">Re-link</string>
 </resources>

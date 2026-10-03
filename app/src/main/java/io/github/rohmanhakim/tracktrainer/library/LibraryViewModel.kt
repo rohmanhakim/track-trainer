@@ -6,33 +6,58 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.rohmanhakim.tracktrainer.data.local.SourceType
 import io.github.rohmanhakim.tracktrainer.data.local.Track
+import io.github.rohmanhakim.tracktrainer.data.prefs.AppPreferences
+import io.github.rohmanhakim.tracktrainer.data.repo.TrackHealthChecker
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackRepository
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** What the library screen renders: the rows plus which ones lost their source file. */
+data class LibraryUiState(
+    val tracks: List<Track> = emptyList(),
+    val missingIds: Set<Long> = emptySet(),
+)
+
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: TrackRepository,
+    private val healthChecker: TrackHealthChecker,
+    private val preferences: AppPreferences,
 ) : ViewModel() {
 
-    val tracks: StateFlow<List<Track>> = repository.observeTracks()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /**
+     * Health re-runs on every DB emission (library load, add, re-link) — checked on
+     * load per T04's "How", never a background poller; a new subscription after
+     * process death re-checks from scratch.
+     */
+    val uiState: StateFlow<LibraryUiState> = repository.observeTracks()
+        .flatMapLatest { tracks ->
+            flow {
+                emit(LibraryUiState(tracks = tracks, missingIds = healthChecker.findMissing(tracks)))
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
 
     private val _messages = Channel<String>(Channel.BUFFERED)
     val messages: Flow<String> = _messages.receiveAsFlow()
@@ -61,12 +86,72 @@ class LibraryViewModel @Inject constructor(
                         ),
                     )
                 }
+                showCloudHintOnce(uri)
             } catch (e: Exception) {
                 // Grant/read failures (revoked provider, unreadable file) must never
-                // crash the app — T04 hardens this path properly with re-link.
+                // crash the app — the missing-state + re-link path is T04's answer.
                 Log.w(TAG, "Failed to add track $uri", e)
                 _messages.trySend("Couldn't add track — file may be unreadable")
             }
+        }
+    }
+
+    /**
+     * Re-point an existing track at a fresh source (P1-1a re-link). Order matters:
+     * store the new reference before releasing the old grant, so a mid-way failure
+     * never leaves the row pointing at nothing; release failures are benign.
+     */
+    fun relinkTrack(trackId: Long, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val existing = repository.getById(trackId)
+                        ?: error("Track $trackId no longer exists")
+                    // Same contract as addTrack: READ-only modeFlags (see above).
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
+                    repository.update(
+                        existing.copy(
+                            sourceRef = uri.toString(),
+                            title = readDisplayName(uri),
+                            durationMs = readDurationMs(uri),
+                        ),
+                    )
+                    releaseOldGrant(existing.sourceRef, uri.toString())
+                }
+                showCloudHintOnce(uri)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to re-link track $trackId to $uri", e)
+                _messages.trySend("Couldn't re-link track — file may be unreadable")
+            }
+        }
+    }
+
+    /**
+     * 01-product-overview §5.1: non-blocking one-time hint when the picked file
+     * isn't stored on this device. Providers expose no "is-cloud" flag, so this is
+     * an allowlist heuristic — unknown authority ⇒ maybe-cloud; a false positive
+     * costs one ignored toast, and only ever once.
+     */
+    private suspend fun showCloudHintOnce(uri: Uri) {
+        if (uri.authority in LOCAL_AUTHORITIES) return
+        if (preferences.cloudHintShown.first()) return
+        preferences.markCloudHintShown()
+        _messages.trySend("This file isn't stored on this device — offline playback won't work.")
+    }
+
+    private fun releaseOldGrant(oldRef: String, newRef: String) {
+        if (oldRef == newRef) return
+        try {
+            context.contentResolver.releasePersistableUriPermission(
+                oldRef.toUri(),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        } catch (e: Exception) {
+            // Already released/revoked — nothing to give back; must not fail the re-link.
+            Log.w(TAG, "Old grant not held for $oldRef", e)
         }
     }
 
@@ -98,5 +183,12 @@ class LibraryViewModel @Inject constructor(
     companion object {
         private const val TAG = "TrackTrainer"
         private const val DEFAULT_TITLE = "Untitled track"
+
+        /** Authorities that are demonstrably on-device (§5.1 cloud-hint allowlist). */
+        private val LOCAL_AUTHORITIES = setOf(
+            "com.android.externalstorage.documents",
+            "media",
+            "com.android.providers.downloads.documents",
+        )
     }
 }

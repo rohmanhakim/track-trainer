@@ -13,5 +13,9 @@ class TrackRepository @Inject constructor(
 ) {
     fun observeTracks(): Flow<List<Track>> = trackDao.observeAll()
 
+    suspend fun getById(id: Long): Track? = trackDao.getById(id)
+
     suspend fun add(track: Track): Long = trackDao.insert(track)
+
+    suspend fun update(track: Track) = trackDao.update(track)
 }

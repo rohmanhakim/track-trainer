@@ -22,7 +22,7 @@ and per-session status/notes.
 | T01 | Compose foundation | done | S1 checklist |
 | T02 | Dependencies + Hilt + Room skeleton | done | S1 checklist |
 | T03 | Library screen + local reference | done | P1-1 |
-| T04 | Missing-file detection & re-link | not-started | P1-1a |
+| T04 | Missing-file detection & re-link | done | P1-1a |
 | T05 | Player core | not-started | P1-2, P1-5 |
 | T06 | Speed control | not-started | P1-3, spike S-3 |
 | T07 | Portrait study layout | not-started | P1-4 |
@@ -275,7 +275,7 @@ a library list that survives restart and reboot.
 
 ## T04 — Missing-file detection & re-link
 
-**Status:** not-started · **Depends on:** T03 · **Stories:** P1-1a
+**Status:** done · **Depends on:** T03 · **Stories:** P1-1a
 
 ### Goal
 A moved/deleted/revoked local file shows a clear ⚠️ state with a re-link action;
@@ -296,13 +296,85 @@ the app never crashes.
 - Run the check on library load (cheap) and on track open — not a background poller.
 
 ### Acceptance
-- [ ] P1-1a: rename/delete source file → row flags missing, app never crashes
-- [ ] Re-link with a valid file → track restored (and playable once T05 exists)
-- [ ] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green
-- [ ] Verified on physical device
+- [x] P1-1a: rename/delete source file → row flags missing, app never crashes
+- [x] Re-link with a valid file → track restored (and playable once T05 exists)
+- [x] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green
+- [x] Verified on physical device *(owner-approved emulator override — same
+  standing approval as T01–T03; physical re-confirmation rolls into T07's sweep)*
 
 ### Session notes
-_(pending)_
+
+**Done 2026-10-03 — all acceptance boxes checked (emulator verification, standing
+owner override; physical re-confirmation deferred to T07's DoD sweep).**
+
+- **Files:** new `data/repo/TrackHealthChecker.kt` (persistable-grant check +
+  real `openFileDescriptor` probe; **never throws** — any failure ⇒ "missing";
+  injectable so T05 can reuse it on track open); new `data/prefs/AppPreferences.kt`
+  (**first real DataStore use** — one `cloud_hint_shown` boolean, `.catch` scoped
+  to `IOException` only); `TrackDao`/`TrackRepository` (+`@Update`, +`getById` —
+  **no schema change, no migration**); `LibraryViewModel` (`LibraryUiState
+  (tracks, missingIds)` built via `observeTracks().flatMapLatest { check }`,
+  `relinkTrack()`, `showCloudHintOnce()`, `releaseOldGrant()`); `LibraryScreen`
+  (missing-row UI: ⚠️ error-colored line + trailing **Re-link** `TextButton`;
+  `pendingRelinkId: Long?` via `rememberSaveable` routes one shared SAF launcher);
+  `strings.xml` +2 (`library_missing`, `library_relink`).
+- **Decision — computed state, not flag column** (task allowed either): a derived
+  value doesn't justify a Room migration (schema v1 is committed) and a stored
+  flag would go stale — recomputed on every load and after add/re-link, no poller.
+- **Decision — checker in `data/repo/`:** it resolves `Track.sourceRef`
+  (repository-layer concern) rather than being a library-UI detail.
+- **Deviation — one launcher, not two:** plan wording said "second launcher", but
+  a single `OpenDocument` launcher + `pendingRelinkId` (null = add, set = re-link,
+  cleared before dispatch so a cancelled pick can't hijack the next add) is fewer
+  moving parts for identical behavior. Also: plan listed a `library_relink_failed`
+  string key — kept VM snackbar messages **hardcoded** per T03's convention
+  (only composable-referenced text lives in `strings.xml`).
+- **⚠️ Empirical finding — the grant dies with the file.** On this API 37 image,
+  deleting the source made `persistedUriPermissions` stop listing the URI
+  (log: `Source check: grant not held for …`), and **restoring the file did not
+  bring the grant back** — the row stays flagged until Re-link. AOSP docs don't
+  document revocation-on-delete (searched — nothing found). Behavior is *correct*:
+  without the grant, T05 playback would hit `SecurityException` anyway, and
+  Re-link re-takes the grant (verified healing). **Never-throw contract earned its
+  keep:** `releasePersistableUriPermission` on the dead grant threw
+  `SecurityException` ("No permission grants found"), *not* the documented
+  `IllegalArgumentException` — the broad `catch (e: Exception)` saved the re-link.
+  Same-URI re-pick skips release via the `oldRef == newRef` guard (both paths
+  exercised on device). Added decision logging (`grant not held` / `open returned
+  no descriptor`) after the first silent run made the branch impossible to tell —
+  worth keeping for T05 debugging.
+- **Cloud hint (owner chose: include now):** authority allowlist
+  (`com.android.externalstorage.documents`, `media`,
+  `com.android.providers.downloads.documents` = local; anything else ⇒ maybe-cloud)
+  + one-time snackbar persisted in DataStore. **Untestable on the emulator** (no
+  Drive app → picker only shows local roots) — verified by code review; heuristic
+  tradeoff recorded (false positive = one ignored toast, once).
+- **Lint:** first run flagged 2× `UseKtx` (`Uri.parse` → `String.toUri()`) from
+  the new code → fixed both → **0 errors, 7 warnings** on final source,
+  byte-identical to the T01–T03 baseline. Note: the compiler emits KT-73255
+  `@ApplicationContext` annotation-target warnings for constructor params —
+  same pattern T03's ViewModel already had (compiler-level, not lint).
+- **Builds:** `assembleDebug` 23s warm; `testDebugUnitTest` 4–6s; `lintDebug`
+  2m 55s cold (config-cache store for the lint graph) then warm.
+- **Emulator verification (2026-10-03, `emulator-5554`, API 37) — final binary:**
+  - Baseline healthy (file present, no warning, no false positive).
+  - `rm /sdcard/Movies/bb.mp4` → force-stop + relaunch → row still renders from
+    cache, **⚠️ File missing + Re-link**; log `Source check: grant not held`;
+    **zero FATAL/AndroidRuntime, crash buffer empty**.
+  - File restored → still flagged (grant dead, see finding) → **Re-link** →
+    DocumentsUI (opens straight into Movies) → picked `bb-relink.mp4` (new name ⇒
+    `sourceRef` change observable) → title/duration re-read, warning cleared.
+  - Restart → healthy persists (`Track DB ready` only, silent passing check);
+    DB WAL shows updated `sourceRef`; delete cycle repeated on the final build →
+    same flagged state, no crash. Device left in a clean healthy state.
+- **Tooling gotchas for future sessions:** (1) the emulator display slept
+  mid-session — `screencap` kept returning a **frozen frame** (tell: stale
+  status-bar clock vs `adb shell date`) and `uiautomator dump` failed silently;
+  fixed with `KEYCODE_WAKEUP` + `wm dismiss-keyguard`. **When screenshot clock
+  and logcat disagree, trust uiautomator dump + logcat.** (2) Two parallel adb
+  batches force-stopped the app into contradictory states — device verification
+  must be strictly sequential.
+- **Testing:** manual verification only (owner decision carried over from T03).
 
 ---
 
