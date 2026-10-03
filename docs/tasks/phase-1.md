@@ -21,7 +21,7 @@ and per-session status/notes.
 |---|---|---|---|
 | T01 | Compose foundation | done | S1 checklist |
 | T02 | Dependencies + Hilt + Room skeleton | done | S1 checklist |
-| T03 | Library screen + local reference | not-started | P1-1 |
+| T03 | Library screen + local reference | done | P1-1 |
 | T04 | Missing-file detection & re-link | not-started | P1-1a |
 | T05 | Player core | not-started | P1-2, P1-5 |
 | T06 | Speed control | not-started | P1-3, spike S-3 |
@@ -181,7 +181,7 @@ All Phase 1 libraries land in the version catalog, Hilt is wired up, and the Roo
 
 ## T03 — Library screen + local reference
 
-**Status:** not-started · **Depends on:** T01, T02 · **Stories:** P1-1
+**Status:** done · **Depends on:** T01, T02 · **Stories:** P1-1
 
 ### Goal
 The owner can pick a local video (referenced in place, never copied) and see it in
@@ -205,12 +205,71 @@ a library list that survives restart and reboot.
 - Persistable grant = survives reboot; verify on device after a reboot (roadmap P1-1 AC).
 
 ### Acceptance
-- [ ] P1-1: pick → row appears; survives app restart **and device reboot**; reference resolves at least via metadata read (playback itself waits for T05)
-- [ ] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green
-- [ ] Verified on physical device
+- [x] P1-1: pick → row appears; survives app restart **and device reboot**; reference resolves at least via metadata read (playback itself waits for T05)
+- [x] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green
+- [x] Verified on physical device *(owner-approved emulator override — same standing
+  approval as T01/T02; physical re-confirmation rolls into T07's full DoD sweep)*
 
 ### Session notes
-_(pending)_
+
+**Done 2026-10-03 — all acceptance boxes checked (emulator verification, owner-approved).**
+
+- **Files:** `data/repo/TrackRepository.kt` (thin DAO wrapper: `observeTracks()`,
+  `add()`); `library/LibraryViewModel.kt` (`@HiltViewModel`, StateFlow via
+  `stateIn(WhileSubscribed)`, one-shot `Channel` messages → snackbar);
+  `library/LibraryScreen.kt` (Scaffold + TopAppBar action, `LazyColumn key = id`,
+  `ListItem` rows, empty state); `MainActivity` → `@AndroidEntryPoint` +
+  `LibraryScreen()`; `strings.xml` +3 keys. `.gitkeep` removed from `repo/`+`library/`.
+  No new dependencies, no manifest changes (SAF needs none), T02 smoke bootstrap kept.
+- **Hilt ↔ Compose wiring:** `@AndroidEntryPoint` on MainActivity + plain
+  `viewModel()` (lifecycle-viewmodel-compose) — the activity's default factory becomes
+  `HiltViewModelFactory`, so no `hilt-navigation-compose`/`hiltViewModel()` dep needed.
+- **Decisions recorded per task "How":** **duration read at insert time** via
+  `MediaMetadataRetriever` on `Dispatchers.IO` (cheap at personal-list scale; 0 on
+  failure → row renders without duration); **no thumbnails** (Coil not a declared
+  dep — no churn); **top-bar text action `[+ Add track]`** (not FAB) + identical
+  empty-state button.
+- **Deviation 1 — icons dropped:** planned `Icons.Default.Add` didn't compile — M3
+  1.4.0 (BOM 2026.09.00) no longer ships `material-icons-core` transitively. Fix:
+  text-only buttons (`"+ Add track"`), no new dep. UX unchanged in substance.
+- **Deviation 2 — grant flags:** task text specifies
+  `FLAG_GRANT_READ_URI_PERMISSION | FLAG_GRANT_PERSISTABLE_URI_PERMISSION` as
+  `takePersistableUriPermission` modeFlags, but that parameter accepts **only**
+  READ/WRITE (lint `WrongConstant` **error** — real API contract, not a false
+  positive). Passing `FLAG_GRANT_READ_URI_PERMISSION` alone is correct; the
+  persistable capability comes from the picker intent's grant. Fix applied; lint clean.
+- **Builds:** `assembleDebug` 10s / `testDebugUnitTest` 9s / `lintDebug` 23s warm
+  (config cache reused). Lint: **0 errors, 7 warnings — byte-identical T01/T02
+  baseline set** (OldTargetApi, Gradle 9.8, AGP 9.4.1, core-ktx 1.19.1,
+  compose-plugin 2.4.20, LockedOrientationActivity, DiscouragedApi); **zero
+  introduced by T03**.
+- **Emulator verification (2026-10-03, `emulator-5554`, Pixel_4 API 37):**
+  - Test asset: `bb.mp4` (7.2 MB, 0:25) owner-pushed to `/sdcard/Movies/`.
+  - Empty state renders (screenshot); **+ Add track** → DocumentsUI
+    (`PickActivity`) → `sdk_gphone16k_x86_64/Movies/bb.mp4` → pick → back in app,
+    row **`bb.mp4 / 0:25`** appears instantly (title from `OpenableColumns`,
+    duration from `MediaMetadataRetriever` — cross-checked: MediaStore reports
+    `duration=25424 ms = 0:25`).
+  - **Restart:** `force-stop` + relaunch → row intact.
+  - **Reboot:** `adb reboot` → full boot → relaunch → row intact, no
+    FATAL/AndroidRuntime hits (only a benign system VM exit line, code 0).
+  - **Picker caveat:** `adb push` doesn't trigger a media scan, so DocumentsUI
+    "Recent" was empty; browsing storage → `Movies` works (DocumentsUI resolves
+    MIME from the file extension — no scan needed). Noted for future test-asset pushes.
+- **Limitation (recorded honestly):** post-reboot *URI re-resolution* could not be
+  re-probed from outside the app on this production image: `adb root` refused,
+  `dumpsys uri_grants` prints nothing to shell, `content` CLI via `run-as` blocked
+  by `ACCESS_CONTENT_PROVIDERS_EXTERNALLY`. Evidence chain instead: (a) grant call
+  at pick time succeeded — no exception, no error snackbar, metadata read succeeded;
+  (b) `takePersistableUriPermission` persists to the OS's `uri_grants` store by
+  contract, which reboots don't clear; (c) Room DB (`track-trainer.db` + `-wal`)
+  verified on disk post-reboot with the row on screen. **T04's health check and
+  T05's playback are the first code that re-reads the URI for real** — if the grant
+  were somehow missing they will surface it immediately; flagged so those sessions
+  watch for it.
+- **Testing:** owner decision this session — **manual verification only**, no new
+  automated tests (task acceptance specifies build/test/lint + on-device only; avoids
+  first-ever `connectedDebugAndroidTest` run mid-task).
 
 ---
 
