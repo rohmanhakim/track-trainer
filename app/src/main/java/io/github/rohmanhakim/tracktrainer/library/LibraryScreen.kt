@@ -2,6 +2,7 @@ package io.github.rohmanhakim.tracktrainer.library
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -43,6 +44,7 @@ private val VIDEO_MIME_TYPES = arrayOf("video/*")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
+    onTrackClick: (Long) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: LibraryViewModel = viewModel(),
 ) {
@@ -103,6 +105,7 @@ fun LibraryScreen(
                             pendingRelinkId = track.id
                             pickLauncher.launch(VIDEO_MIME_TYPES)
                         },
+                        onClick = { onTrackClick(track.id) },
                     )
                     HorizontalDivider()
                 }
@@ -112,8 +115,11 @@ fun LibraryScreen(
 }
 
 @Composable
-private fun TrackRow(track: Track, missing: Boolean, onRelink: () -> Unit) {
+private fun TrackRow(track: Track, missing: Boolean, onRelink: () -> Unit, onClick: () -> Unit) {
     ListItem(
+        // Missing rows stay tappable: the player health-checks on open and shows the
+        // error there (T04's "on track open" check) instead of crashing.
+        modifier = Modifier.clickable(onClick = onClick),
         headlineContent = {
             Text(track.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
         },

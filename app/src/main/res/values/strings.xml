@@ -4,4 +4,7 @@
     <string name="library_empty">No tracks yet\nPick a local video to get started</string>
     <string name="library_missing">⚠️ File missing</string>
     <string name="library_relink">Re-link</string>
+    <string name="player_back">Back</string>
+    <string name="player_play">Play</string>
+    <string name="player_pause">Pause</string>
 </resources>

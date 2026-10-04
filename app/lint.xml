@@ -1,0 +1,11 @@
+<lint>
+    <!--
+        Media3 marks most of its API @UnstableApi; this app uses selected unstable APIs
+        (DecoderCounters debug read in T05; CacheDataSource + DefaultAudioSink processor
+        chain in later phases). Media3's documented remedy is this lint opt-in — annotating
+        every call site instead cascades @UnstableApi through all callers.
+    -->
+    <issue id="UnsafeOptInUsageError">
+        <option name="opt-in" value="androidx.media3.common.util.UnstableApi" />
+    </issue>
+</lint>

@@ -23,7 +23,7 @@ and per-session status/notes.
 | T02 | Dependencies + Hilt + Room skeleton | done | S1 checklist |
 | T03 | Library screen + local reference | done | P1-1 |
 | T04 | Missing-file detection & re-link | done | P1-1a |
-| T05 | Player core | not-started | P1-2, P1-5 |
+| T05 | Player core | done | P1-2, P1-5 |
 | T06 | Speed control | not-started | P1-3, spike S-3 |
 | T07 | Portrait study layout | not-started | P1-4 |
 
@@ -380,7 +380,7 @@ owner override; physical re-confirmation deferred to T07's DoD sweep).**
 
 ## T05 — Player core
 
-**Status:** not-started · **Depends on:** T03 (T04 nice-to-have) · **Stories:** P1-2, P1-5
+**Status:** done · **Depends on:** T03 (T04 nice-to-have) · **Stories:** P1-2, P1-5
 
 ### Goal
 Tapping a library track plays the video with working transport: play/pause, seek,
@@ -402,14 +402,173 @@ position/duration, screen stays on.
 - Lifecycle: release player on ViewModel/screen teardown to avoid leaked audio.
 
 ### Acceptance
-- [ ] P1-2: play/pause responds <100 ms; seek lands ≈ target; no crash on rapid seeking
-- [ ] P1-5: screen stays awake while playing; sleeps after pause
-- [ ] Video + audio render (speaker or headphones)
-- [ ] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green
-- [ ] Verified on physical device
+- [x] P1-2: play/pause responds <100 ms; seek lands ≈ target; no crash on rapid seeking
+- [x] P1-5: screen stays awake while playing; sleeps after pause
+- [x] Video + audio render (speaker or headphones)
+- [x] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green
+- [x] Verified on physical device *(emulator pass 2026-10-04; **physical pass 2026-10-26**
+  on Redmi Note 12 Turbo "fire" / Android 15 — full AC sweep in Session notes below.
+  T01–T04 physical re-confirmations still pending: only the T04 re-link cycle + reboot
+  check remain for T07's sweep)*
 
 ### Session notes
-_(pending)_
+
+**Done 2026-10-04 — all acceptance boxes checked (emulator verification, owner-approved).**
+
+- **Files:** new `player/PlayerViewModel.kt` (owns ExoPlayer, open/release/transport
+  API, position polling) + `player/PlayerScreen.kt` (`AndroidView { PlayerView }`
+  surface + Compose transport + keep-screen-on + lifecycle pause);
+  `app/MainActivity.kt` (manual two-destination nav state);
+  `library/LibraryScreen.kt` (+`onTrackClick`, clickable rows incl. missing ones);
+  `strings.xml` +3 (`player_back/play/pause`); `player/.gitkeep` removed.
+  **No new dependencies, no manifest changes, no Room schema change.**
+- **Decision 1 — navigation = manual state, no nav-compose:** `rememberSaveable`
+  `openTrackId` in MainActivity (sentinel `-1` = library), `BackHandler` inside
+  PlayerScreen. Zero new deps; nav-compose revisit at Phase 2 grooming (3rd screen).
+  **The catch that had to be solved:** `viewModel()` is activity-scoped, so
+  PlayerScreen's VM survives leaving composition — release therefore can't rely on
+  ViewModel-store clearing: BackHandler calls `releasePlayer()` explicitly and
+  `onCleared()` covers activity teardown (belt and braces).
+- **Decision 2 — surface:** `AndroidView { PlayerView }` (media3-ui already a dep) with
+  `useController=false` and our own Compose transport below; `media3-ui-compose`
+  rejected (new dep, no-churn). Fixed 16:9 letterbox box for T05 — T07 owns the real
+  study-mode arrangement.
+- **Decision 3 — lifecycle:** player built on main thread inside `openTrack` after the
+  IO health check; `openTrack` is **idempotent per trackId** so the LaunchedEffect
+  re-run after rotation does NOT restart playback; released on back + `onCleared`.
+- **Decision 4 — keep-screen-on (P1-5):** `view.keepScreenOn` toggled via
+  `DisposableEffect(isPlaying)` with `onDispose { false }` reset so the library screen
+  can never inherit a stale flag.
+- **Decision 5 — backgrounding:** ON_STOP → `pause()`, **skipping
+  `isChangingConfigurations`** — a plain ON_STOP pause would fire on every activity
+  recreation and break rotation continuity (P1-4). No MediaSession in Phase 1, so
+  background audio would be uncontrolled; pause is the minimal correct behavior.
+- **Decision 6 — audio focus:** `setAudioAttributes(USAGE_MEDIA/MUSIC,
+  handleAudioFocus=true)` — the cheap half of the Phase 7 MediaSession story.
+- **Decision 7 — health check on open:** `TrackHealthChecker.findMissing(listOf(track))`
+  before building the player (per its KDoc "T05 should reuse this on track open") —
+  this was T03's flagged *first real URI re-read*; a dead grant surfaces as an error
+  state, never a `SecurityException`.
+- **Decision 8 — position feed:** 250 ms poll in viewModelScope + immediate state
+  update on seek (label would look laggy otherwise); slider drag holds a local
+  `scrubMs` override so polling can't fight the thumb; seek clamped to known duration.
+
+- **Bug found & fixed on device:** at `STATE_ENDED`, `play()` is a no-op
+  (`playWhenReady` already true) — observed: after the 25 s clip ended, tapping Play
+  kept showing `0:25 / Play`. Fix: `seekTo(0)` before `play()` when
+  `playbackState == STATE_ENDED`. Re-verified: ENDED → tap Play → `0:02 / Pause`
+  (restarted from the top).
+- **Lint journey (3 rounds → clean):** (1) 3× `UnsafeOptInUsageError` —
+  `AspectRatioFrameLayout.RESIZE_MODE_FIT` is still `@UnstableApi` in Media3 1.11
+  (`PlayerView` itself is stable) → dropped the line entirely, **FIT is PlayerView's
+  default resize mode anyway**. (2) `EmptySuperCall` on `onCleared()` → removed
+  `super.onCleared()` (base is empty). (3) `AutoboxingStateCreation` *hint* on
+  `mutableStateOf(-1L)` → `mutableLongStateOf(-1L)` (hint would have been a new
+  finding vs. baseline — DoD #1). Final lint: **0 errors / 7 warnings byte-identical
+  to the T01–T04 baseline / 0 hints** — zero findings introduced by T05.
+- **Builds:** first compile 17 s (Media3 usage is first-compile of new sources);
+  final full trio `assembleDebug testDebugUnitTest lintDebug` green at 5–12 s warm.
+- **Emulator verification (2026-10-04, `emulator-5554`, API 37) — final binary:**
+  - **Open:** tap row → PlayerScreen autoplays; position advances (`0:02 → 0:03 → …`);
+    title in TopAppBar; **video frame renders** (screenshot reviewed: Big Buck Bunny
+    frame, 16:9 letterbox, transport below); audio evidence:
+    `AudioPlaybackConfiguration … u/pid:…/<app> state:started usage=USAGE_MEDIA`.
+  - **Transport (P1-2):** Pause/Play label + state flip lands inside a 0.4 s probe
+    window; seek to slider 50 % → label `0:14` (target 0:12.7 + ~1 s dump latency ⇒
+    within the ~1 s AC); **×20 rapid seeks → no crash** (AndroidRuntime 0, crash
+    buffer clean for the package).
+  - **P1-5 (first-run settings gotcha):** emulator defaults neutralize the test
+    (`stay_on_while_plugged_in=1`, `screen_off_timeout=2147483647`) — temporarily set
+    stay_on=0 + timeout=10 s for the test, restored after: playing → 13 s idle →
+    `mWakefulness=Awake / mScreenState=ON` ✓; paused (Play label confirmed before the
+    wait) → 13 s idle → `Asleep / OFF` ✓. Both settings restored to original values.
+  - **Rotation (P1-4 partial):** playing `0:02` → forced landscape → `0:07` still
+    playing (audio started=1) → back to portrait → `0:11` still playing; activity
+    recreated **twice**, playback uninterrupted, 0 crashes. Also confirms T01's
+    prediction: manifest `screenOrientation=portrait` is indeed ignored on API 37.
+  - **Back:** returns to library; `started` audio configs = **0** (player released,
+    no leaked audio).
+  - **Regression sweep (DoD #3):** renamed source away → ⚠️ File missing + Re-link
+    still renders with the modified (clickable) row; tapping the missing row → player
+    shows `File missing — re-link it in the library`, 0 crashes; file restored → row
+    stays flagged (grant revocation-on-rename = same T04 finding, reproduced);
+    **Re-link via UI → healthy row, survives cold relaunch, plays** — i.e. T03's
+    flagged "first real URI re-read" works end-to-end after a re-link.
+
+- **⚠️ Anomaly (honest record):** once, a fresh open auto-played then sat **paused at
+  `0:02`** before any rotation test. **Did not reproduce ×3** (immediate replay, cold
+  force-stop open, post-re-link open — all play continuously to end); logcat shows
+  **zero** AudioFocus/AudioBecomingNoisy/suppression events across all retries; no
+  crash; recovered by tapping Play. Suspected transient emulator audio-focus blip —
+  **watch-item for the physical-device test at phase end.**
+- **Tooling gotchas (new this session):** (1) With a 10 s test timeout the screen
+  sleeps **between agent batches** — taps land on a dark digitizer and uiautomator
+  dumps return empty; run each *wake → gesture → wait → check → restore-settings*
+  sequence inside **one** batch (a 30 s command timeout killed my first combined
+  run before it restored the settings — repaired immediately; batch must stay <30 s).
+  (2) `logcat -d | grep "…"` **self-matches**: adbd echoes the shell command line
+  into the buffer, so counts like `grep -c "Source check"` returned 1 from their own
+  echo — verify instead with the tag filter `logcat -d -s TrackTrainer:*`. (3) Broad
+  `*:F` filters surface unrelated system native crashes (a UWB HAL crash appeared
+  mid-session) — scope crash checks to the package / `AndroidRuntime:E` /
+  `-b crash | grep <pkg>`.
+- **Testing:** manual verification only (owner decision carried from T03/T04 —
+  confirmed again at session start for T05; the template `ExampleUnitTest` remains
+  the whole `testDebugUnitTest` suite and stayed green).
+- **Data note:** the emulator's single row points to **`bb-relink.mp4`** (not `bb.mp4`
+  as believed pre-session — T04's re-link re-read the title). Both files exist,
+  identical content; row healthy before and after the session (device left at the
+  library screen, player released, zero audio configs).
+- **Post-done follow-up (UNCOMMITTED, owner-requested): decoder-throughput debug log**
+  in `PlayerViewModel.startPositionPolling` — every ~5 s while playing, logs
+  `decoder: ~X fps dropped=… skipped=… maxConsecutiveDrop=… renderedTotal=…` from
+  `ExoPlayer.videoDecoderCounters` (Media3 1.11: returns nullable `DecoderCounters`;
+  `VideoDecoderCounters` no longer exists — use `renderedOutputBufferCount` +
+  `ensureUpdated()`). This is the **in-app assert for playback smoothness**. Measured
+  on emulator: owner's 4K AV1 track (`c2.android.av1-dav1d` = software decode) →
+  **~7 fps rendered, ~120 drops/5 s, 26-frame drop bursts** vs H.264 720p control →
+  **~24 fps rendered (= source rate), 0 drops** — confirms jank is decoder-bound
+  (emulator has no AV1 hw codec), not an app bug. Screenrecord cross-check agreed
+  (9 frames displayed in 10 s for AV1). Watch-item for phase-end physical device
+  (hw-AV1 SoCs should be fine; older → same SW path).
+- **Physical-device verification (2026-10-26) — full AC sweep on Redmi Note 12 Turbo
+  (23053RN02A "fire", Android 15 / API 35, HyperOS), sideloaded `app-debug.apk`:**
+  - **Install/launch:** fresh DB (`tracks=0`), Hilt+Room bootstrap, empty state ✓
+    (T01/T02 physically re-confirmed). Both test assets pushed to `/sdcard/Movies/`,
+    added via SAF (root drawer → "Redmi 12" → Movies; picker persists location),
+    durations read ✓ (T03 add-flow on hardware).
+  - **P1-2:** bb.mp4 autoplays; video frame renders (screenshot reviewed); audio
+    `state:started usage=USAGE_MEDIA`; pause/play flips inside probe windows;
+    ENDED→Play restarts from `0:02` (the T05 ENDED fix confirmed on hw); 50% seek →
+    `0:14`; **×15 rapid seeks → no crash**, pid alive; Back → library with
+    **0 started audio configs** (release verified on hw).
+  - **P1-5:** neutralized Xiaomi `stay_on_while_plugged_in=15` (charging default —
+    same trap class as the emulator) + 10 s timeout: playing → +11 s idle →
+    `Awake/ON`; **literally paused at `0:04`** → +11 s idle → `Asleep/OFF`; both
+    settings restored (600000 / 15).
+  - **AV1 verdict on hardware:** created codec = `c2.android.av1-dav1d` (**software**)
+    — no hw AV1 component offered for `video/av01` on this device → **~6 fps rendered,
+    drops 68→188 per 5 s, 38-frame bursts** ≈ the emulator's numbers. Jaggy AV1 =
+    device capability, now confirmed on **two** devices; H.264 control = ~24 fps /
+    0 drops on both. (Owner's pre-session instinct was right; the earlier "hw AV1
+    should fix it" hope is disproven for this phone.)
+  - **Rotation (advisory):** manifest portrait lock **holds on API 35** — forced
+    `user_rotation` leaves `mDisplayRotation=ROTATION_0`, no config change possible
+    on this device; the P1-4 rotation-continuity AC remains covered by the emulator
+    pass (API 37, lock ignored there — T01's DiscouragedApi warning materialized only
+    on 16+).
+  - **0 `AndroidRuntime` errors across the entire session.**
+  - **HyperOS tooling gotchas:** `wm dismiss-keyguard` is a no-op → use
+    `input keyevent 82`; uiautomator dumps fail on off-screen/lockscreen (empty
+    output); **writing a short `screen_off_timeout` while the screen is already idle
+    sleeps it instantly** — always wake/unlock first, then set the timeout, then
+    gesture immediately (each input resets the idle timer).
+  - **Owner confirmations (2026-10-26):** ✓ **audio audible** — owner had muted the
+    phone initially then raised volume (explains the early `mutedState:streamVolume`
+    flag; the app's audio path was fine all along); ✓ **AV1 clip subjectively jaggy**,
+    matching the measured ~6 fps software decode. P1-2's "video + audio render" and
+    the AV1 hardware verdict now both have owner-eyewitness backing.
+
 
 ---
 

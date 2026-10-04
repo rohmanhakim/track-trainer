@@ -36,6 +36,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+    lint {
+        // See app/lint.xml — project-level opt-in for selected Media3 @UnstableApi usage.
+        lintConfig = file("lint.xml")
+    }
 }
 
 // Schemas exported to app/schemas/ and committed (owner decision — see T02 session notes).
