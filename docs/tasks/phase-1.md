@@ -24,8 +24,8 @@ and per-session status/notes.
 | T03 | Library screen + local reference | done | P1-1 |
 | T04 | Missing-file detection & re-link | done | P1-1a |
 | T05 | Player core | done | P1-2, P1-5 |
-| T06 | Speed control | in-progress | P1-3, spike S-3 |
-| T07 | Portrait study layout | not-started | P1-4 |
+| T06 | Speed control | done | P1-3, spike S-3 |
+| T07 | Portrait study layout | done | P1-4 |
 
 **Order:** T01→T02 foundation; T03→T04 data before player; T05→T06 features;
 T07 only once controls exist to arrange. Environment reminder: every Gradle
@@ -641,11 +641,21 @@ The portrait study layout from 01-product-overview §5.2 becomes real: video top
   not two screens (01-product-overview §5.2).
 
 ### Acceptance
-- [ ] P1-4: portrait shows documented arrangement; landscape = graceful fallback; playback uninterrupted through rotation
-- [ ] All Phase 1 stories (P1-1, P1-1a, P1-2, P1-3, P1-5) re-verified as done
-- [ ] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green
-- [ ] Full Definition of Done sweep on physical device → **Phase 1 exit** (roadmap §10)
+- [x] P1-4: portrait shows documented arrangement; landscape = graceful fallback; playback uninterrupted through rotation
+- [x] All Phase 1 stories (P1-1, P1-1a, P1-2, P1-3, P1-5) re-verified as done
+- [x] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green
+- [x] Full Definition of Done sweep on physical device → **Phase 1 exit** (roadmap §10)
 
 ### Session notes
-_(pending)_
+
+**Done 2026-10-26 — all acceptance boxes checked.**
+
+- **Files:** new `ui/study/StudyScreen.kt` (orientation-aware root: portrait study mode + graceful landscape fallback), `ui/study/PlayerSurface.kt`, `ui/study/PlaceholderSlot.kt`; `ui/shared/Transport.kt` and `ui/shared/SpeedControls.kt` extracted from `player/PlayerScreen.kt` (T05/T06 composables, now shared across orientations); `player/PlayerScreen.kt` reduced to a thin adapter (playback lifecycle, keep-screen-on, pause-on-background, manual nav unchanged). Removed `android:screenOrientation="portrait"` from `AndroidManifest.xml` so rotation drives orientation per product §5.2 / P1-4 (T01's lock was a temporary Phase 1 dev constraint). No new Gradle deps; no Room schema change.
+- **Portrait study mode (01-product-overview §5.2):** video pinned top ~40 % (16:9 letterboxed black box), control surface below with real Transport + SpeedControls, then disabled placeholder slots for Loop (A–B) / Tap tempo / Count-in & metronome (Phases 3–5 fill them).
+- **Landscape fallback:** full-bleed video with Transport + SpeedControls stacked at the bottom (full HUD deferred to a later phase).
+- **P1-4 rotation continuity:** ViewModel-owned ExoPlayer survives recreation; ON_STOP excludes config changes (unchanged from T05). **Verified live on both devices after removing the manifest lock:** emulator API 37 — SurfaceView full-bleed landscape, playback continued at `0:08`/`Pause`; Redmi API 35 (HyperOS) — landscape orientation active, transport (`0:25`/`Play`, ENDED state) + speed controls at bottom.
+- **On-device verification:** portrait study layout + autoplay/transport/speed/placeholders confirmed via uiautomator on **emulator-5554 (API 37)** and **Redmi 94d32c7b7d78 (API 35, HyperOS)**; landscape fallback confirmed on both; no `AndroidRuntime`/FATAL for the package on either device.
+- **Builds:** `assembleDebug` + `testDebugUnitTest` + `lintDebug` green; lint findings now **7** (was 9): removing the portrait lock dropped the two `LockedOrientationActivity`/`DiscouragedApi` findings; zero new warnings introduced by T07.
+- **T06 close-out:** spike S-3 listen check examined by owner and marked done; speed control (0.25×–2×, pitch preserved, survives pause/play, carries across tracks) physically verified on Redmi with headphones in T06.
+- **Phase 1 review:** all P1 stories (P1-1, P1-1a, P1-2, P1-3, P1-5) re-verified as done; Definition of Done (§10) sweep complete → **Phase 1 exit**. Leftovers (YouTube, cache, loop, count-in, metronome, boost, landscape focus HUD, MediaSession) noted for Phase 2+ grooming per roadmap §3 ("Explicitly NOT in Phase 1").
 
