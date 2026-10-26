@@ -145,11 +145,17 @@ fun PlayerScreen(
                 ) {
                     CircularProgressIndicator()
                 }
-                else -> Transport(
-                    uiState = uiState,
-                    onTogglePlayPause = viewModel::togglePlayPause,
-                    onSeek = viewModel::seekTo,
-                )
+                else -> Column {
+                    Transport(
+                        uiState = uiState,
+                        onTogglePlayPause = viewModel::togglePlayPause,
+                        onSeek = viewModel::seekTo,
+                    )
+                    SpeedControls(
+                        speed = uiState.speed,
+                        onSpeedChange = viewModel::setSpeed,
+                    )
+                }
             }
         }
     }
@@ -222,6 +228,54 @@ private fun Transport(
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
+    }
+}
+
+/**
+ * Speed control UI: preset chips (0.5× / 0.75× / 1×) plus a fine slider (0.25×–2×).
+ * Value is session-level and applied live via [PlayerViewModel.setSpeed].
+ */
+@Composable
+private fun SpeedControls(
+    speed: Float,
+    onSpeedChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val presets = listOf(0.5f, 0.75f, 1f)
+    Column(modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            presets.forEach { preset ->
+                Button(
+                    onClick = { onSpeedChange(preset) },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(text = "${preset.toString()}x")
+                }
+            }
+        }
+        var scrubSpeed by remember { mutableStateOf<Float?>(null) }
+        val shownSpeed = scrubSpeed ?: speed
+        Slider(
+            value = shownSpeed,
+            onValueChange = { scrubSpeed = it },
+            onValueChangeFinished = {
+                scrubSpeed?.let(onSpeedChange)
+                scrubSpeed = null
+            },
+            valueRange = 0.25f..2.0f,
+            steps = 35, // 0.05× steps
+            enabled = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = String.format("x%.2f", shownSpeed),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.End,
+        )
     }
 }
 

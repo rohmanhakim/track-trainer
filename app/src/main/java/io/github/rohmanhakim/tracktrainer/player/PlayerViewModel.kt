@@ -8,6 +8,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -32,6 +33,8 @@ data class PlayerUiState(
     val isPlaying: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
+    /** Current playback speed (session-level; 0.25×–2×). */
+    val speed: Float = 1f,
     /** Non-null = playback can't run (dead source, decode failure) — surfaced, never a crash. */
     val error: String? = null,
 )
@@ -56,6 +59,8 @@ class PlayerViewModel @Inject constructor(
 
     /** Null until a track is open; guards the rotation re-entry of [openTrack]. */
     private var openedTrackId: Long? = null
+    /** Session-level speed; reapplied to each fresh ExoPlayer in [startPlayer], preserved across tracks. */
+    private var currentSpeed = 1f
     private var positionJob: Job? = null
     private var playerListener: Player.Listener? = null
 
@@ -66,7 +71,7 @@ class PlayerViewModel @Inject constructor(
     fun openTrack(trackId: Long) {
         if (trackId == openedTrackId && _player.value != null) return
         viewModelScope.launch {
-            _uiState.update { PlayerUiState(isLoading = true, title = it.title) }
+            _uiState.update { it.copy(isLoading = true, title = it.title) }
             val track = repository.getById(trackId)
             if (track == null) {
                 fail("Track not found")
@@ -109,6 +114,18 @@ class PlayerViewModel @Inject constructor(
         _uiState.update { it.copy(positionMs = target) }
     }
 
+    /**
+     * Set playback speed (session-level, survives pause/play). Applied live to the player;
+     * if the player isn't built yet the stored value is applied in [startPlayer].
+     */
+    fun setSpeed(speed: Float) {
+        val clamped = speed.coerceIn(0.25f, 2.0f)
+        currentSpeed = clamped
+        _uiState.update { it.copy(speed = clamped) }
+        val player = _player.value ?: return
+        player.setPlaybackParameters(PlaybackParameters(clamped))
+    }
+
     /** Pause without tearing down — used when the app leaves the foreground. */
     fun pause() {
         _player.value?.pause()
@@ -135,6 +152,8 @@ class PlayerViewModel @Inject constructor(
             // sounds fighting; no MediaSession until Phase 7, this is the cheap half.
             .setAudioAttributes(audioAttributes, true)
             .build()
+        // Apply the session speed to the fresh player (default 1× if never changed).
+        player.setPlaybackParameters(PlaybackParameters(currentSpeed))
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _uiState.update { it.copy(isPlaying = isPlaying) }
@@ -153,7 +172,8 @@ class PlayerViewModel @Inject constructor(
         openedTrackId = trackId
         playerListener = listener
         _player.value = player
-        _uiState.update { PlayerUiState(isLoading = false, title = title, durationMs = durationMs) }
+        // Preserve session speed across track opens (P1-3e); only refresh loading/title/duration.
+        _uiState.update { it.copy(isLoading = false, title = title, durationMs = durationMs) }
         startPositionPolling(player)
     }
 

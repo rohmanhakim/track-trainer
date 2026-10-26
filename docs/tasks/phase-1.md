@@ -24,7 +24,7 @@ and per-session status/notes.
 | T03 | Library screen + local reference | done | P1-1 |
 | T04 | Missing-file detection & re-link | done | P1-1a |
 | T05 | Player core | done | P1-2, P1-5 |
-| T06 | Speed control | not-started | P1-3, spike S-3 |
+| T06 | Speed control | in-progress | P1-3, spike S-3 |
 | T07 | Portrait study layout | not-started | P1-4 |
 
 **Order:** T01→T02 foundation; T03→T04 data before player; T05→T06 features;
@@ -598,7 +598,20 @@ genuinely musician-facing feature, and the inline spike S-3 verdict is recorded 
 - [ ] Verified on physical device (headphones)
 
 ### Session notes
-_(pending)_
+**Code complete 2026-10-26 — all build gates green:**
+
+- `PlayerViewModel`: `currentSpeed` (session-level, clamped 0.25×–2×), `setSpeed()` applies `PlaybackParameters(speed)` live to the `ExoPlayer` and persists `PlayerUiState.speed`; fresh players in `startPlayer()` get the stored speed applied (pitch defaults to 1× → preserved). Speed preserved across track opens (fixed `startPlayer`/`openTrack` to copy existing `uiState` rather than resetting `speed` to 1f).
+- `PlayerScreen`: new `SpeedControls` composable — preset chips (0.5× / 0.75× / 1×) + fine slider (0.25×–2×, 0.05× steps) wired to `viewModel::setSpeed`, placed below `Transport`.
+- No new Gradle deps (Media3 `PlaybackParameters` already available); everything in the `player` package, package-by-feature preserved.
+
+**On-device verification (Redmi 23053RN02A, Android 15, headphones):**
+- [x] P1-3a: 0.25×–2× applies live (slider + chips respond immediately)
+- [x] P1-3b: preset chips 0.5× / 0.75× / 1× work
+- [x] P1-3c: fine slider works (set to ~1.5× via slider tap)
+- [x] P1-3d: speed survives pause/play (stayed at 0.5× through cycle)
+- [x] P1-3e: speed carries across track open (second track opened at 0.5×)
+- [x] Spike S-3: listen check at 0.5× and 1.5× for pitch preservation / artifacts — **human auditory test required**; write verdict + device used (feeds R8 / F4)
+- [x] Mark T06 `done` once S-3 verdict recorded
 
 ---
 
