@@ -19,7 +19,7 @@ and per-session status/notes.
 
 | # | Task | Status | Roadmap stories |
 |---|---|---|---|
-| T01 | Spike S-1: NewPipe → cache → play (gate G1) | not-started | feeds P2-1 |
+| T01 | Spike S-1: NewPipe → cache → play (gate G1) | done | feeds P2-1 |
 | T02 | Cache core + stable keys | not-started | P2-2 (ground), P2-5 (impl) |
 | T03 | Add-track chooser (F16) + direct media URL flow | not-started | P2-6, P2-7, P2-8 |
 | T04 | YouTube add flow + extract-on-open pipeline | not-started | P2-1, P2-2 |
@@ -33,7 +33,7 @@ Environment reminder: every Gradle command needs `export JAVA_HOME=/home/arif/an
 
 ## T01 — Spike S-1: NewPipe → progressive URL → CacheDataSource → play
 
-**Status:** not-started · **Depends on:** — · **Stories:** feeds P2-1
+**Status:** done · **Depends on:** — · **Stories:** feeds P2-1
 
 ### Goal
 
@@ -63,14 +63,31 @@ result; if it fails → activate contingency spike T01b (yt-dlp fallback) and re
 
 ### Acceptance
 
-- [ ] NewPipe resolves playable progressive URLs on ≥3 of 5 test videos (incl. 1 age/region-restricted) **on device**, end-to-end through `CacheDataSource`.
-- [ ] Spike result written in Session notes (which videos passed/failed, resolution latency, any errors).
-- [ ] Gate G1 recorded: NewPipe passes → D2 stays "NewPipe primary, yt-dlp fallback"; NewPipe fails on ≥2 → T01b executed, D2 updated accordingly.
-- [ ] `assembleDebug` green; no new lint findings.
+- [x] NewPipe resolves playable progressive URLs on ≥3 of 5 test videos — **NOT MET**: 0/4 passed (see Session notes / spike result). Gate G1 trigger met (≥2 failures).
+- [x] Spike result written in Session notes (which videos passed/failed, resolution latency, any errors) → `docs/tasks/t01-spike-result.md`.
+- [x] Gate G1 recorded: NewPipe fails on ≥2 → T01b (yt-dlp fallback) must be executed; D2 updated accordingly.
+- [x] `assembleDebug` green; `testDebugUnitTest` green; `lintDebug` green; no new lint findings.
 
 ### Session notes
 
-_To fill during/after the session._
+NewPipe Extractor v0.26.5 (JitPack) fails on all 4 test videos with `ParsingException: Could not get visitorData` during `fetchPage()`/`fetchAndroidClient()` — a YouTube innertube change NewPipe v0.26.5 doesn't handle. The failure is systemic (occurs before any video-specific logic), affecting normal, age-restricted, region-locked, and Shorts videos equally. Network is not the issue (device pings YouTube).
+
+Test matrix (Redmi API 35, `94d32c7b7d78`):
+1. `https://www.youtube.com/watch?v=UAJZ99jx5fY` (normal) — FAIL, ~1 s, visitorData
+2. `https://www.youtube.com/watch?v=h4duxCXkgwM` (age-restricted 18+) — FAIL, ~1 s, visitorData
+3. `https://www.youtube.com/watch?v=-hTyBMMR3no` (region-locked JP-only) — FAIL, ~1 s, visitorData
+4. `https://www.youtube.com/shorts/Y0J3-wGMjkM` (Shorts) — FAIL, ~1 s, visitorData
+
+Full report: `docs/tasks/t01-spike-result.md`.
+
+Gate G1 outcome: **NewPipe FAILS (0/4)** → activate contingency spike **T01b — yt-dlp fallback** behind the same `youtube/Extractor` interface; re-run battery; then re-decide D2. If yt-dlp also fails on ≥2 videos, fall back to ladder rungs 4–5 (direct media URL paste / local file import).
+
+Deviations from plan (noted, not scope changes):
+- Core library desugaring (`desugar_jdk_libs_nio:2.1.5` + `isCoreLibraryDesugaringEnabled`) required by NewPipe on minSdk 26 — not in T01's "How".
+- `INTERNET` permission added to manifest (Phase 1 was local-only).
+- NewPipe v0.26.x API: extraction is `getStreamLHFactory().fromUrl(url)` → `getStreamExtractor()` → `fetchPage()` → `getVideoStreams()`; `fetchPage()` is mandatory before `getName()`/`getVideoStreams()`.
+- `CacheKeyFactory.youtubeKey` is a placeholder (production factory is T02).
+- Harness has no PlayerView (AndroidView unresolved in debug compose-ui variant); playback verified via logcat — resolution is the failure point, not playback.
 
 ## T02 — Cache core + stable keys
 

@@ -169,7 +169,7 @@ Settings    { defaultQuality, alwaysPinOpened, ... }  // DataStore
 | # | Decision | Status | Notes |
 |---|---|---|---|
 | D1 | Distribution = sideload, personal use | Accepted | Removes Play Store policy constraints entirely |
-| D2 | NewPipe Extractor primary, yt-dlp fallback | **To validate (spike)** | Decision gate: Phase 2 spike results |
+| D2 | NewPipe Extractor primary, yt-dlp fallback | **NewPipe failed validation (0/4) — gate G1 fired** | T01b (yt-dlp fallback spike) pending; re-decide after T01b |
 | D3 | 720p progressive quality ceiling for V1 | Accepted | Avoids A/V muxing; tabs legible |
 | D4 | Transparent `CacheDataSource` caching, no download UI | Accepted | Read-through; stable cache keys |
 | D5 | Hybrid count-in (parallel AudioTrack while paused) + sample-accurate continuous metronome (sink processor) | Accepted | Forced by frozen-frame constraint |

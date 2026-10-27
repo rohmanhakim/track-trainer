@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.rohmanhakim.tracktrainer">
+
+    <application>
+        <!-- T01 spike harness: start via `adb am start -n io.github.rohmanhakim.tracktrainer/io.github.rohmanhakim.tracktrainer.youtube.spike.SpikeActivity`. -->
+        <activity
+            android:name=".youtube.spike.SpikeActivity"
+            android:exported="true" />
+    </application>
+
+</manifest>

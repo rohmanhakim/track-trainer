@@ -10,3 +10,8 @@
 #-keepclassmembers class fqcn.of.javascript.interface.for.webview {
 #   public *;
 #}
+
+# Required by NewPipe Extractor (Rhino JS engine used for YouTube deciphering).
+-keep class org.mozilla.javascript.** { *; }
+-keep class org.mozilla.classfile.ClassFileWriter { *; }
+-dontwarn org.mozilla.javascript.tools.**

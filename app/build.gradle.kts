@@ -36,6 +36,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+    // NewPipe Extractor requires core library desugaring on minSdk < 33 (we target 26).
+    compileOptions {
+        isCoreLibraryDesugaringEnabled = true
+    }
     lint {
         // See app/lint.xml — project-level opt-in for selected Media3 @UnstableApi usage.
         lintConfig = file("lint.xml")
@@ -69,6 +73,13 @@ dependencies {
 
     // Coroutines / Flow
     implementation(libs.kotlinx.coroutines.android)
+
+    // NewPipe Extractor (Phase 2 T01 spike — JitPack release v0.26.5)
+    implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.5")
+
+    // Required by NewPipe Extractor on minSdk < 33 (core library desugaring). Must be declared
+    // in the coreLibraryDesugaring configuration (not implementation) once isCoreLibraryDesugaringEnabled is on.
+    coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
 
     // Lifecycle / ViewModel
     implementation(libs.androidx.lifecycle.viewmodel.compose)
