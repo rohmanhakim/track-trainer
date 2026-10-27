@@ -19,15 +19,12 @@ speed control, A-B loop, animated count-in, tap-tempo metronome, volume boost.
 
 ## Current status
 
-- **Phase 1 prep: empty scaffold generated** (Android Studio template — Views/AppCompat,
-  no launcher activity, sources dir empty). Docs complete.
-- **Current execution checklist:** `docs/tasks/phase-1.md` — 7 session tasks (T01–T07).
-  Work through them in order; T01 (Compose foundation) is the first task. Update each
+- **Phase 1 complete** (exited 2026-10-26): Compose + M3 foundation, local video playback,
+  speed control 0.25×–2×, portrait study layout + graceful landscape fallback, all on-device
+  verified (emulator API 37 + Redmi API 35). `docs/tasks/phase-1.md` — T01–T07 all `done`.
+- **Current execution checklist:** `docs/tasks/phase-2.md` — 6 session tasks (T01–T06).
+  Work through them in order; T01 (NewPipe spike, gate G1 → D2) is the first task. Update each
   task's status + Session notes as you go.
-- **First Phase 1 task:** convert the template to the documented stack — Compose + M3
-  (MainActivity + launcher intent), add missing deps to `libs.versions.toml`
-  (Media3, Hilt, Room, DataStore, coroutines/Flow, Compose BOM), Hilt `Application`.
-  See `docs/tasks/phase-1.md` T01/T02 and `docs/03-roadmap.md` Phase 1 S1.
 - Then follow `docs/03-roadmap.md`: one phase at a time, stories + acceptance
   criteria, Definition of Done applies (§10).
 

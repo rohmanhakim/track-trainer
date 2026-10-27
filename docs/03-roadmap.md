@@ -62,6 +62,10 @@ execution status; this section remains the scope authority.
 
 **Goal:** second source, invisible caching. **Contains the decision-gate spike for D2.**
 
+**Session-level task breakdown:** [`docs/tasks/phase-2.md`](tasks/phase-2.md) —
+6 focused sessions (T01–T06), each with scope + acceptance + notes. That file tracks
+execution status; this section remains the scope authority.
+
 **Deliverables**
 - **Spike (first task):** NewPipe Extractor → progressive URL → `CacheDataSource` → play. Test on 3–5 real videos incl. age/region-restricted ones. Write spike result; if it fails → activate yt-dlp fallback spike; update D2.
 - **Add-track 3-source chooser (F16):** local video / YouTube link / direct media URL (01-product-overview §5.1) — local option lands here as a proper source even though local playback works from Phase 1.
