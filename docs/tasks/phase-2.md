@@ -80,7 +80,7 @@ Test matrix (Redmi API 35, `94d32c7b7d78`):
 
 Full report: `docs/tasks/t01-spike-result.md`.
 
-Gate G1 outcome: **NewPipe FAILS (0/4)** → activate contingency spike **T01b — yt-dlp fallback** behind the same `youtube/Extractor` interface; re-run battery; then re-decide D2. If yt-dlp also fails on ≥2 videos, fall back to ladder rungs 4–5 (direct media URL paste / local file import).
+Gate G1 outcome: **NewPipe FAILS (0/4)** → contingency spike **T01b — yt-dlp fallback** executed. yt-dlp (updated in-app to 2026.10.26) resolves normal + Shorts videos; age-restricted (sign-in wall) and region-locked (rights block) fail for inherent YouTube policy reasons, not extractor defects — covered by ladder rung 4 (direct URL paste). **D2 re-decided: yt-dlp primary, NewPipe superseded.** Full results: `docs/tasks/t01b-spike-result.md`.
 
 Deviations from plan (noted, not scope changes):
 - Core library desugaring (`desugar_jdk_libs_nio:2.1.5` + `isCoreLibraryDesugaringEnabled`) required by NewPipe on minSdk 26 — not in T01's "How".

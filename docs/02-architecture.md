@@ -169,7 +169,7 @@ Settings    { defaultQuality, alwaysPinOpened, ... }  // DataStore
 | # | Decision | Status | Notes |
 |---|---|---|---|
 | D1 | Distribution = sideload, personal use | Accepted | Removes Play Store policy constraints entirely |
-| D2 | NewPipe Extractor primary, yt-dlp fallback | **NewPipe failed validation (0/4) — gate G1 fired** | T01b (yt-dlp fallback spike) pending; re-decide after T01b |
+| D2 | YouTube extraction = yt-dlp primary (`io.github.junkfood02.youtubedl-android:library:0.18.1`, in-app `updateYoutubeDL` as the R1 mitigation) | **Validated (gate G1)** | NewPipe v0.26.5 failed 0/4 on device (`visitorData` break); yt-dlp resolves all publicly-available videos (age/region-restricted fail on inherent YouTube policy walls, covered by fallback ladder rung 4) |
 | D3 | 720p progressive quality ceiling for V1 | Accepted | Avoids A/V muxing; tabs legible |
 | D4 | Transparent `CacheDataSource` caching, no download UI | Accepted | Read-through; stable cache keys |
 | D5 | Hybrid count-in (parallel AudioTrack while paused) + sample-accurate continuous metronome (sink processor) | Accepted | Forced by frozen-frame constraint |

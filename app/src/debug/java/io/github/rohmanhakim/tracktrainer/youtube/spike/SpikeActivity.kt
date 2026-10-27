@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Spacer
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
@@ -41,13 +42,17 @@ import kotlinx.coroutines.withContext
 import io.github.rohmanhakim.tracktrainer.cache.CacheKeyFactory
 import io.github.rohmanhakim.tracktrainer.youtube.Extractor
 import io.github.rohmanhakim.tracktrainer.youtube.NewPipeYoutubeExtractor
+import io.github.rohmanhakim.tracktrainer.youtube.YtDlpExtractor
+import com.yausername.youtubedl_android.YoutubeDL
 
 /**
- * Throwaway T01 spike harness.
+ * Throwaway T01/T01b spike harness.
  *
  * adb: am start -n io.github.rohmanhakim.tracktrainer/io.github.rohmanhakim.tracktrainer.youtube.spike.SpikeActivity
+ *   -e url "<watch url>"      # auto-resolve on launch (battery mode)
+ *   -e impl "ytdlp"           # pick yt-dlp extractor instead of NewPipe (default: newpipe)
  *
- * Paste a YouTube watch URL -> Resolve (calls NewPipe Extractor) -> Play (feeds progressive URL into
+ * Paste a YouTube watch URL -> Resolve (calls Extractor impl) -> Play (feeds progressive URL into
  * Media3 CacheDataSource -> ExoPlayer). Status shown on screen for the spike session notes.
  */
 class SpikeActivity : ComponentActivity() {
@@ -57,21 +62,47 @@ class SpikeActivity : ComponentActivity() {
     val status: String get() = _status.value
     /** URL to auto-resolve when launched via intent extra ("url"). */
     private var urlToResolve: String? = null
+    /** Which Extractor impl to use ("ytdlp" or anything else -> NewPipe). */
+    private var implName: String = "newpipe"
+    /** Whether to update the bundled yt-dlp binary before resolving ("1" = yes). */
+    private var doUpdate: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        extractor = NewPipeYoutubeExtractor(applicationContext)
+        val intentImpl = intent.getStringExtra("impl")
+        implName = if (intentImpl != null && intentImpl.equals("ytdlp", ignoreCase = true)) "ytdlp" else "newpipe"
+        doUpdate = intent.getStringExtra("update") == "1"
+        extractor = when (implName) {
+            "ytdlp" -> YtDlpExtractor(applicationContext)
+            else -> NewPipeYoutubeExtractor(applicationContext)
+        }
         player = ExoPlayer.Builder(this).build()
         // Intent-extra driven auto-resolve for the battery:
-        //   am start -n .../SpikeActivity -e url "<watch url>"
+        //   am start -n .../SpikeActivity -e url "<watch url>" [-e impl ytdlp] [-e update 1]
         val intentUrl = intent.getStringExtra("url")
         if (intentUrl != null && intentUrl.isNotEmpty()) {
             urlToResolve = intentUrl
         }
+        // R1 mitigation: refresh the bundled yt-dlp binary from yt-dlp upstream before resolving.
+        if (doUpdate && implName == "ytdlp") {
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) {
+                    try {
+                        YoutubeDL.getInstance().init(this@SpikeActivity)
+                        val status = YoutubeDL.getInstance().updateYoutubeDL(this@SpikeActivity, YoutubeDL.UpdateChannel.STABLE)
+                        _status.value = "yt-dlp update: $status (resolving next launch)"
+                        Log.d("T01SPIKE", "yt-dlp update: $status")
+                    } catch (e: Exception) {
+                        _status.value = "yt-dlp update failed: ${e.message}"
+                        Log.e("T01SPIKE", "yt-dlp update failed", e)
+                    }
+                }
+            }
+        }
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    SpikeUi(extractor = extractor, onStatus = { s -> _status.value = s })
+                    SpikeUi(extractor = extractor, implName = implName, onStatus = { s -> _status.value = s })
                 }
             }
         }
@@ -99,7 +130,7 @@ class SpikeActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun SpikeUi(extractor: Extractor, onStatus: (String) -> Unit) {
+    private fun SpikeUi(extractor: Extractor, implName: String, onStatus: (String) -> Unit) {
         val scope = rememberCoroutineScope()
         var url by remember { mutableStateOf("") }
         var lastUrl by remember { mutableStateOf("") }
@@ -115,7 +146,7 @@ class SpikeActivity : ComponentActivity() {
                         val resolved = extractor.resolve(target)
                         lastUrl = resolved.progressiveUrl
                         lastItag = resolved.itag
-                        "RESOLVED in ${System.currentTimeMillis() - start} ms\nTitle: ${resolved.title}\nVideoId: ${resolved.videoId}\n" +
+                        "[$implName] RESOLVED in ${System.currentTimeMillis() - start} ms\nTitle: ${resolved.title}\nVideoId: ${resolved.videoId}\n" +
                             "Duration: ${resolved.durationMs} ms\nItag: ${resolved.itag}\nURL: ${resolved.progressiveUrl}"
                     } catch (e: Exception) {
                         lastUrl = ""
@@ -135,7 +166,7 @@ class SpikeActivity : ComponentActivity() {
                     .fillMaxSize()
                     .padding(16.dp)
             ) {
-                Text(text = "T01 Spike — NewPipe -> CacheDataSource -> play", style = MaterialTheme.typography.headlineMedium)
+                Text(text = "T01 Spike — $implName -> CacheDataSource -> play", style = MaterialTheme.typography.headlineMedium)
                 Spacer(modifier = Modifier.height(16.dp))
                 TextField(
                     value = url,

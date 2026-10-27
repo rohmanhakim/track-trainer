@@ -21,6 +21,9 @@ androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = 
 
 # Required by NewPipe Extractor on minSdk < 33 (core library desugaring).
 desugar-jdk-libs-nio = { group = "com.android.tools", name = "desugar_jdk_libs_nio", version.ref = "desugarJdkLibsNio" }
+
+# yt-dlp fallback for YouTube extraction (Phase 2 T01b, gated by G1).
+youtubedl-android-library = { group = "io.github.junkfood02.youtubedl-android", name = "library", version = "0.18.1" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }

@@ -40,6 +40,13 @@ android {
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
     }
+    // youtubedl-android bundles its yt-dlp binary as a native lib that must be extracted
+    // to run; Android Studio requires extractNativeLibs=true equivalent for AGP 9.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
     lint {
         // See app/lint.xml — project-level opt-in for selected Media3 @UnstableApi usage.
         lintConfig = file("lint.xml")
@@ -74,7 +81,10 @@ dependencies {
     // Coroutines / Flow
     implementation(libs.kotlinx.coroutines.android)
 
-    // NewPipe Extractor (Phase 2 T01 spike — JitPack release v0.26.5)
+    // yt-dlp fallback for YouTube extraction (Phase 2 T01b).
+    implementation(libs.youtubedl.android.library)
+
+    // NewPipe Extractor (Phase 2 T01 spike — JitPack release v0.26.5).
     implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.5")
 
     // Required by NewPipe Extractor on minSdk < 33 (core library desugaring). Must be declared
