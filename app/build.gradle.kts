@@ -36,10 +36,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    // NewPipe Extractor requires core library desugaring on minSdk < 33 (we target 26).
-    compileOptions {
-        isCoreLibraryDesugaringEnabled = true
-    }
     // youtubedl-android bundles its yt-dlp binary as a native lib that must be extracted
     // to run; Android Studio requires extractNativeLibs=true equivalent for AGP 9.
     packaging {
@@ -81,15 +77,8 @@ dependencies {
     // Coroutines / Flow
     implementation(libs.kotlinx.coroutines.android)
 
-    // yt-dlp fallback for YouTube extraction (Phase 2 T01b).
+    // yt-dlp for YouTube extraction (D2, validated at gate G1).
     implementation(libs.youtubedl.android.library)
-
-    // NewPipe Extractor (Phase 2 T01 spike — JitPack release v0.26.5).
-    implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.5")
-
-    // Required by NewPipe Extractor on minSdk < 33 (core library desugaring). Must be declared
-    // in the coreLibraryDesugaring configuration (not implementation) once isCoreLibraryDesugaringEnabled is on.
-    coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
 
     // Lifecycle / ViewModel
     implementation(libs.androidx.lifecycle.viewmodel.compose)

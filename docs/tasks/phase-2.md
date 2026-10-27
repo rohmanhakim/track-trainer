@@ -20,6 +20,8 @@ and per-session status/notes.
 | # | Task | Status | Roadmap stories |
 |---|---|---|---|
 | T01 | Spike S-1: NewPipe → cache → play (gate G1) | done | feeds P2-1 |
+| T01b | Contingency spike: yt-dlp → cache → play (gate G1) | done | feeds P2-1, D2 |
+| T01c | Remove NewPipe impl + reconcile post-G1 docs | done | D2, R1 docs |
 | T02 | Cache core + stable keys | not-started | P2-2 (ground), P2-5 (impl) |
 | T03 | Add-track chooser (F16) + direct media URL flow | not-started | P2-6, P2-7, P2-8 |
 | T04 | YouTube add flow + extract-on-open pipeline | not-started | P2-1, P2-2 |
@@ -182,7 +184,7 @@ never a silent failure, no WebView (D9).
 
 ### In scope
 
-- YouTube add: paste watch URL → `Extractor` (T01) → `Track(sourceType=YOUTUBE)` with title, duration, youtubeId, thumbnail (P2-1); loading state while resolving ("within a few seconds").
+- YouTube add: paste watch URL → `Extractor` (yt-dlp impl, T01b) → `Track(sourceType=YOUTUBE)` with title, duration, youtubeId, thumbnail (P2-1); loading state while resolving (~30–60 s on add; replays instant from cache).
 - Open pipeline: cache hit → `SimpleCache` replay, no extraction; cache miss (expired URL / first view) → re-extract via `Extractor`; extraction failure → friendly error + fallback hints (direct URL paste / local file import per §3.8 rungs 4–5).
 - Re-extract-on-miss sets `needsRefresh` appropriately; successful resolve clears it.
 - Verify "no download UI anywhere / no 'download' wording" for YouTube path too (P2-2).
@@ -190,8 +192,8 @@ never a silent failure, no WebView (D9).
 
 ### Out of scope
 
-- Age/region-restricted handling beyond what NewPipe returns natively (covered in T01's test set).
-- yt-dlp fallback activation unless G1 triggers T01b (then it's T01b's scope).
+- Age/region-restricted handling beyond what yt-dlp returns natively (covered in T01b's test set; those videos fail on inherent YouTube policy walls — see fallback ladder rung 4).
+- Alternative extractor impls (NewPipe removed after gate G1).
 
 ### How
 
@@ -200,7 +202,7 @@ never a silent failure, no WebView (D9).
 
 ### Acceptance
 
-- [ ] YouTube watch URL → playable within a few seconds on good network (P2-1).
+- [ ] YouTube watch URL → shows resolving state, plays within ~30–60 s on add; replays instant (zero extraction from cache) (P2-1).
 - [ ] Cache-hit replay performs **zero extraction** (verified via logs / no network during replay).
 - [ ] Cache miss after URL expiry → re-extract → plays again, no manual action (feeds P2-4; full battery in T05).
 - [ ] Extraction failure → friendly error + fallback-ladder hints; app never crashes.

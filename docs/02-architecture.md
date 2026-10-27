@@ -7,7 +7,7 @@
 | Language | Kotlin | Current Android standard |
 | UI | Jetpack Compose + Material 3, orientation/`WindowSizeClass` layouts | Standard; one composable set, two arrangements |
 | Media | **Media3 ExoPlayer** (`media3-exoplayer`, `media3-ui`, `media3-session`, `media3-datasource`, `media3-common`) | Speed/pitch, `SeekParameters`, `CacheDataSource`, `DefaultAudioSink` processor chain |
-| YouTube extraction | **NewPipe Extractor (primary)**, `youtubedl-android`/yt-dlp (fallback spike) | Pure-Java, tiny, yields progressive URLs; yt-dlp as resilient backup (§5 D2) |
+| YouTube extraction | **yt-dlp via `youtubedl-android`** (primary, D2 validated at gate G1) | Resolves progressive URLs ≤720p; bundled yt-dlp self-updates in-app via `updateYoutubeDL` when YouTube breaks extraction (§5 D2) |
 | DI | Hilt | Standard |
 | Persistence | Room (tracks, presets), DataStore (settings) | Standard |
 | Async | Kotlin coroutines + Flow | Standard |
@@ -39,7 +39,7 @@ io.github.rohmanhakim.tracktrainer
 │   └── repo/       # TrackRepository, PresetRepository, SettingsRepository
 ├── player/         # ExoPlayer wrapper, speed/seek/frame-step, preset application
 ├── cache/          # CacheDataSource wiring, cache key factory, cache manager
-├── youtube/        # extractor interface, NewPipe impl, yt-dlp impl (spike)
+├── youtube/        # extractor interface, yt-dlp impl (primary; NewPipe removed after gate G1)
 ├── loop/           # A-B loop controller (position polling, seam fade)
 ├── countin/        # count-in scheduling + overlay state
 ├── metronome/      # click synthesis, scheduling, AudioProcessor chain
@@ -62,7 +62,7 @@ LOCAL                          YOUTUBE                      DIRECT URL
 SAF content:// URI             watch URL                    stream URL
 takePersistableUriPermission   │                           │
 (never copied — D11)           ▼                            │
-                        Extractor (NewPipe / yt-dlp) ◄── adapter
+                        Extractor (yt-dlp primary) ◄── adapter
                                │ resolves progressive       │
                                │ URL (≤720p, expires ~6h)   │
                                ▼                            ▼
@@ -139,8 +139,8 @@ decoded PCM ──► [volume boost] ──► [click mix] ──► device
 When a YouTube video won't resolve, work down the ladder — every rung preserves the full feature set:
 
 1. **Cache hit** — previously viewed videos replay from `SimpleCache` with *no extraction at all* (stable key) ✅
-2. **NewPipe fails → yt-dlp fallback** (prepared behind the `youtube/Extractor` interface; activated by gate G1) ✅
-3. **Both broken transiently** — yt-dlp upstream typically fixes within days; sideload model → update APK ✅
+2. **yt-dlp extraction** — `youtube/Extractor` impl (yt-dlp primary, D2); self-updates via `updateYoutubeDL` when YouTube's player JS changes break extraction (R1 mitigation) ✅
+3. **yt-dlp itself broken** — upstream typically fixes within days; sideload model → update APK ✅
 4. **Still stuck → direct media URL paste** (add-track option 3, e.g. desktop `yt-dlp -g <link>`) → same `CacheDataSource` pipeline ✅
 5. **Nuclear → local file import** — download/transfer the file, reference it ✅
 
@@ -169,7 +169,7 @@ Settings    { defaultQuality, alwaysPinOpened, ... }  // DataStore
 | # | Decision | Status | Notes |
 |---|---|---|---|
 | D1 | Distribution = sideload, personal use | Accepted | Removes Play Store policy constraints entirely |
-| D2 | YouTube extraction = yt-dlp primary (`io.github.junkfood02.youtubedl-android:library:0.18.1`, in-app `updateYoutubeDL` as the R1 mitigation) | **Validated (gate G1)** | NewPipe v0.26.5 failed 0/4 on device (`visitorData` break); yt-dlp resolves all publicly-available videos (age/region-restricted fail on inherent YouTube policy walls, covered by fallback ladder rung 4) |
+| D2 | YouTube extraction = yt-dlp primary (`io.github.junkfood02.youtubedl-android:library:0.18.1`, in-app `updateYoutubeDL` as the R1 mitigation) | **Validated (gate G1)** | NewPipe v0.26.5 failed 0/4 on device (`visitorData` break) → NewPipe impl removed 2026-10-27; yt-dlp resolves all publicly-available videos (age/region-restricted fail on inherent YouTube policy walls, covered by fallback ladder rung 4) |
 | D3 | 720p progressive quality ceiling for V1 | Accepted | Avoids A/V muxing; tabs legible |
 | D4 | Transparent `CacheDataSource` caching, no download UI | Accepted | Read-through; stable cache keys |
 | D5 | Hybrid count-in (parallel AudioTrack while paused) + sample-accurate continuous metronome (sink processor) | Accepted | Forced by frozen-frame constraint |

@@ -16,7 +16,7 @@ class ExtractionException(message: String, cause: Throwable? = null) : Exception
 
 /**
  * Thin extraction contract: no Android types, so it can be unit-tested on the JVM and swapped
- * between NewPipe (primary) and yt-dlp (fallback) at gate G1.
+ * between extractor implementations (yt-dlp primary after gate G1).
  */
 interface Extractor {
     /**

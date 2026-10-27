@@ -78,7 +78,7 @@ execution status; this section remains the scope authority.
 
 | ID | Story | Acceptance criteria |
 |---|---|---|
-| P2-1 | As the owner I paste a YouTube link | Resolves and plays within a few seconds on good network |
+| P2-1 | As the owner I paste a YouTube link | Shows a resolving state and plays within ~30–60 s on add (on-device yt-dlp extraction); replays are instant — zero extraction from cache |
 | P2-2 | As the owner the caching is invisible | No download UI anywhere; first view plays while caching; no "download" wording |
 | P2-3 | As the owner I play offline | Airplane-mode play of a previously-viewed video works end-to-end |
 | P2-4 | As the owner cached videos survive URL expiry | Replay >6 h later works (stable cache key), no manual action |

@@ -108,8 +108,7 @@ rely on `docs/02-architecture.md` + official Media3 docs.
 
 ## Risk hot-spots (read `docs/04-risks.md` first)
 
-- **YouTube extraction** (R1, gate G1) — behind the `youtube/Extractor` interface;
-  NewPipe primary, yt-dlp fallback. Spike before committing.
+- **YouTube extraction** (R1, gate G1) — behind the `youtube/Extractor` interface; yt-dlp primary (validated at G1), self-updatable in-app via `updateYoutubeDL`. NewPipe removed after G1.
 - **Audio processor chain** (R2/R3/R10, gate G2) — metronome click mix +
   volume boost live in `DefaultAudioSink`'s processor chain; verify actual
   device behavior, watch for OEM pipelines bypassing it.

@@ -41,19 +41,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.github.rohmanhakim.tracktrainer.cache.CacheKeyFactory
 import io.github.rohmanhakim.tracktrainer.youtube.Extractor
-import io.github.rohmanhakim.tracktrainer.youtube.NewPipeYoutubeExtractor
 import io.github.rohmanhakim.tracktrainer.youtube.YtDlpExtractor
 import com.yausername.youtubedl_android.YoutubeDL
 
 /**
- * Throwaway T01/T01b spike harness.
+ * Throwaway T01b spike harness (yt-dlp, the D2 primary extractor).
  *
  * adb: am start -n io.github.rohmanhakim.tracktrainer/io.github.rohmanhakim.tracktrainer.youtube.spike.SpikeActivity
  *   -e url "<watch url>"      # auto-resolve on launch (battery mode)
- *   -e impl "ytdlp"           # pick yt-dlp extractor instead of NewPipe (default: newpipe)
+ *   -e update 1               # refresh bundled yt-dlp binary before resolving
  *
- * Paste a YouTube watch URL -> Resolve (calls Extractor impl) -> Play (feeds progressive URL into
- * Media3 CacheDataSource -> ExoPlayer). Status shown on screen for the spike session notes.
+ * Paste a YouTube watch URL -> Resolve (calls YtDlpExtractor) -> Play (feeds progressive URL into
+ * Media3 CacheDataSource -> ExoPlayer). Status shown on screen.
  */
 class SpikeActivity : ComponentActivity() {
     private lateinit var extractor: Extractor
@@ -62,29 +61,22 @@ class SpikeActivity : ComponentActivity() {
     val status: String get() = _status.value
     /** URL to auto-resolve when launched via intent extra ("url"). */
     private var urlToResolve: String? = null
-    /** Which Extractor impl to use ("ytdlp" or anything else -> NewPipe). */
-    private var implName: String = "newpipe"
     /** Whether to update the bundled yt-dlp binary before resolving ("1" = yes). */
     private var doUpdate: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val intentImpl = intent.getStringExtra("impl")
-        implName = if (intentImpl != null && intentImpl.equals("ytdlp", ignoreCase = true)) "ytdlp" else "newpipe"
         doUpdate = intent.getStringExtra("update") == "1"
-        extractor = when (implName) {
-            "ytdlp" -> YtDlpExtractor(applicationContext)
-            else -> NewPipeYoutubeExtractor(applicationContext)
-        }
+        extractor = YtDlpExtractor(applicationContext)
         player = ExoPlayer.Builder(this).build()
         // Intent-extra driven auto-resolve for the battery:
-        //   am start -n .../SpikeActivity -e url "<watch url>" [-e impl ytdlp] [-e update 1]
+        //   am start -n .../SpikeActivity -e url "<watch url>" [-e update 1]
         val intentUrl = intent.getStringExtra("url")
         if (intentUrl != null && intentUrl.isNotEmpty()) {
             urlToResolve = intentUrl
         }
         // R1 mitigation: refresh the bundled yt-dlp binary from yt-dlp upstream before resolving.
-        if (doUpdate && implName == "ytdlp") {
+        if (doUpdate) {
             lifecycleScope.launch {
                 withContext(Dispatchers.IO) {
                     try {
@@ -102,7 +94,7 @@ class SpikeActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    SpikeUi(extractor = extractor, implName = implName, onStatus = { s -> _status.value = s })
+                    SpikeUi(extractor = extractor, onStatus = { s -> _status.value = s })
                 }
             }
         }
@@ -130,7 +122,7 @@ class SpikeActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun SpikeUi(extractor: Extractor, implName: String, onStatus: (String) -> Unit) {
+    private fun SpikeUi(extractor: Extractor, onStatus: (String) -> Unit) {
         val scope = rememberCoroutineScope()
         var url by remember { mutableStateOf("") }
         var lastUrl by remember { mutableStateOf("") }
@@ -146,7 +138,7 @@ class SpikeActivity : ComponentActivity() {
                         val resolved = extractor.resolve(target)
                         lastUrl = resolved.progressiveUrl
                         lastItag = resolved.itag
-                        "[$implName] RESOLVED in ${System.currentTimeMillis() - start} ms\nTitle: ${resolved.title}\nVideoId: ${resolved.videoId}\n" +
+                        "RESOLVED in ${System.currentTimeMillis() - start} ms\nTitle: ${resolved.title}\nVideoId: ${resolved.videoId}\n" +
                             "Duration: ${resolved.durationMs} ms\nItag: ${resolved.itag}\nURL: ${resolved.progressiveUrl}"
                     } catch (e: Exception) {
                         lastUrl = ""
@@ -166,7 +158,7 @@ class SpikeActivity : ComponentActivity() {
                     .fillMaxSize()
                     .padding(16.dp)
             ) {
-                Text(text = "T01 Spike — $implName -> CacheDataSource -> play", style = MaterialTheme.typography.headlineMedium)
+                Text(text = "T01b Spike — yt-dlp -> CacheDataSource -> play", style = MaterialTheme.typography.headlineMedium)
                 Spacer(modifier = Modifier.height(16.dp))
                 TextField(
                     value = url,

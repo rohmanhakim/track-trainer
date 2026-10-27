@@ -17,8 +17,7 @@ import kotlinx.coroutines.withContext
  * be refreshed in-app via [YoutubeDL.updateYoutubeDL], which is the practical half of R1's
  * "updates within hours" mitigation when YouTube breaks extraction.
  *
- * Errors surface as [ExtractionException] — same contract as [NewPipeYoutubeExtractor], so the two
- * are swap-compatible behind [Extractor] at gate G1.
+ * Errors surface as [ExtractionException] — same contract as [Extractor], swap-compatible at gate G1.
  */
 class YtDlpExtractor(private val context: Context) : Extractor {
 
