@@ -134,7 +134,7 @@ private fun PortraitStudy(
 
         when {
             error != null -> Text(
-                text = error,
+                text = error.message,
                 color = MaterialTheme.colorScheme.error,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
@@ -216,7 +216,7 @@ private fun LandscapeFallback(
 
         if (uiState.error != null) {
             Text(
-                text = uiState.error,
+                text = uiState.error.message,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(16.dp),
                 textAlign = TextAlign.Center,

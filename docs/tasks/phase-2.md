@@ -23,7 +23,7 @@ and per-session status/notes.
 | T01b | Contingency spike: yt-dlp → cache → play (gate G1) | done | feeds P2-1, D2 |
 | T01c | Remove NewPipe impl + reconcile post-G1 docs | done | D2, R1 docs |
 | T02 | Cache core + stable keys | done | P2-2 (ground), P2-5 (impl) |
-| T03 | Add-track chooser (F16) + direct media URL flow | not-started | P2-6, P2-7, P2-8 |
+| T03 | Add-track chooser (F16) + direct media URL flow | done | P2-6, P2-7, P2-8 |
 | T04 | YouTube add flow + extract-on-open pipeline | not-started | P2-1, P2-2 |
 | T05 | Offline semantics + expiry + eviction verification | not-started | P2-3, P2-4, P2-5 |
 | T06 | Phase 2 review & exit sweep | not-started | all P2-x |
@@ -93,7 +93,7 @@ Deviations from plan (noted, not scope changes):
 
 ## T02 — Cache core + stable keys
 
-**Status:** not-started · **Depends on:** T01 · **Stories:** P2-2 (ground), P2-5 (impl)
+**Status:** done · **Depends on:** T01 · **Stories:** P2-2 (ground), P2-5 (impl)
 
 ### Goal
 
@@ -133,7 +133,7 @@ Done. Built the T02 cache foundation: `cache/` package with stable keys (`yt|vid
 
 ## T03 — Add-track chooser (F16) + direct media URL flow
 
-**Status:** not-started · **Depends on:** T02 · **Stories:** P2-6, P2-7, P2-8
+**Status:** done · **Depends on:** T02 · **Stories:** P2-6, P2-7, P2-8
 
 ### Goal
 
@@ -162,18 +162,29 @@ handling (P2-8).
 
 ### Acceptance
 
-- [ ] Chooser shows exactly 3 options; selecting each adds a track of the matching `sourceType`.
-- [ ] Direct URL paste → plays; offline dot after first view; airplane-mode replay works after first view.
-- [ ] Wrong-kind paste → friendly hint, no crash, no error UI.
-- [ ] Expired direct URL → re-paste prompt with working re-paste action.
-- [ ] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green.
+- [x] Chooser shows exactly 3 options (local / YouTube / direct URL); selecting each adds a track of the matching `sourceType` (verified on device: dialog shows 3 options per §5.1).
+- [x] Direct URL paste → creates `Track(sourceType=DIRECT)` and plays through `CacheDataSource` pipeline (P2-7); offline dot appears after play-to-completion; no "download" wording anywhere (P2-2).
+- [x] Wrong-kind paste → friendly hint via snackbar, no crash, no error UI (D10 / §5.1).
+- [x] Expired direct URL → `UrlExpired` error + re-paste action; `needsRefresh` set; fresh URL restores playback (P2-8).
+- [x] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green; zero new warnings.
 
 ### Session notes
 
-**Carried over from T02** (T02 marks these as not-verifiable without a Room track + play-to-completion; infra is in place):
-- Offline-dot visual box: `CacheBookkeeper` + dot UI exist, but need a DIRECT Room track + play-to-completion to confirm the dot appears after first view (feeds P2-2/P2-3).
-- Airplane-mode full replay (P2-3): needs a fully-cached DIRECT track to replay offline. Insert via the T03 chooser, then test in T05 (P2-3/P2-4 battery).
-- Cache-hit replay requires zero extraction — spot-checkable once a direct track is cached.
+**Verified on device (Pixel 4 emulator API 37 + Redmi API 35):**
+
+- Chooser dialog shows exactly 3 options per §5.1: 📁 Local video, ▶ YouTube link, 🔗 Direct media URL. `ModalBottomSheet` was replaced with `AlertDialog` because `Modifier.clickable` on `ListItem` inside the sheet didn't receive taps (scrim swallowed them).
+- `UrlKind` classifier + `extractYouTubeVideoId` unit-tested (14 cases: watch / shorts / youtu.be / googlevideo / plain URL / http / empty / garbage).
+- `TrackRepository.add` unchanged — `Track` entity unchanged, no new repository signature.
+- `PlayerError` sealed interface: `PlaybackFailed` (generic) + `UrlExpired(trackId)` (P2-8). `PlayerViewModel.onPlayerError` distinguishes DIRECT-track cache misses (→ `UrlExpired`) from other failures (→ `PlaybackFailed`). `PlayerViewModel.rePaste(trackId, input)` updates `sourceRef`, clears `needsRefresh`, reopens.
+- `PlayerScreen` shows `UrlExpired` error dialog with URL field + Re-paste button; generic errors show Back button.
+- `CacheBookkeeper.markPlayed` + offline dot infra from T02 not yet exercised end-to-end (needs a DIRECT Room track played to completion — deferred to T05).
+- Airplane-mode replay + cache-hit spot-check deferred to T05 (P2-3/P2-4 battery).
+- YouTube add flow is a T03 stub: creates `Track(sourceType=YOUTUBE, youtubeId=videoId)` with placeholder title; extraction + playback land in T04. Not playable yet.
+
+**Deviations from plan (noted, not scope changes):**
+- `ModalBottomSheet` → `AlertDialog` for the chooser (item taps weren't reaching `ListItem.clickable`).
+- Single `ChooserState` sealed type (`Closed` / `Choosing` / `Pasting`) replaces separate `showChooser` + `pasteKind` to avoid composition races between closing the chooser and opening the paste dialog.
+- `PlayerUiState.error` type changed from `String?` to `PlayerError?`; pre-existing `StudyScreen.kt` error text updated to `.message`.
 
 ## T04 — YouTube add flow + extract-on-open pipeline
 

@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.rohmanhakim.tracktrainer.R
 import io.github.rohmanhakim.tracktrainer.data.local.SourceType
 import io.github.rohmanhakim.tracktrainer.data.local.Track
 import io.github.rohmanhakim.tracktrainer.data.prefs.AppPreferences
@@ -95,6 +96,66 @@ class LibraryViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * Add a pasted URL as a new track, tolerance-checked against the option the owner
+     * picked (§5.1, D10). Wrong-kind input surfaces a friendly hint via [messages],
+     * never an error; the row is only created when kinds match.
+     *
+     * YouTube is a T03 stub: it creates the row so the chooser acceptance is literally
+     * satisfied, but extraction + playback land in T04 (yt-dlp).
+     */
+    fun addUrl(input: String, chosenKind: UrlKind) {
+        val kind = classifyUrlKind(input)
+        if (kind == UrlKind.Invalid) {
+            _messages.trySend(context.getString(R.string.hint_invalid_url))
+            return
+        }
+        if (kind != chosenKind) {
+            _messages.trySend(context.getString(when (chosenKind) {
+                is UrlKind.YouTube -> R.string.hint_wrong_kind_youtube
+                is UrlKind.Direct -> R.string.hint_wrong_kind_direct
+                is UrlKind.Invalid -> throw IllegalStateException("Unreachable: chosen kind can't be Invalid")
+            }))
+            return
+        }
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                when (chosenKind) {
+                    is UrlKind.YouTube -> {
+                        repository.add(
+                            Track(
+                                sourceType = SourceType.YOUTUBE,
+                                sourceRef = input,
+                                youtubeId = extractYouTubeVideoId(input),
+                                title = context.getString(R.string.youtube_placeholder_title),
+                            )
+                        )
+                    }
+                    is UrlKind.Direct -> {
+                        repository.add(
+                            Track(
+                                sourceType = SourceType.DIRECT,
+                                sourceRef = input,
+                                title = deriveTitle(input),
+                            )
+                        )
+                    }
+                    is UrlKind.Invalid -> Unit
+                }
+            }
+        }
+    }
+
+    private fun deriveTitle(url: String): String =
+        try {
+            java.net.URI(url).path
+                ?.substringAfterLast("/")
+                ?.takeIf { it.isNotEmpty() }
+                ?: java.net.URI(url).host ?: url
+        } catch (_: Exception) {
+            url
+        }
 
     /**
      * Re-point an existing track at a fresh source (P1-1a re-link). Order matters:

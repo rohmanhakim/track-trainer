@@ -4,10 +4,20 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -17,6 +27,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.Player
+import io.github.rohmanhakim.tracktrainer.R
 import io.github.rohmanhakim.tracktrainer.ui.study.StudyScreen
 
 /**
@@ -80,6 +91,53 @@ fun PlayerScreen(
         onSpeedChange = { viewModel.setSpeed(it) },
         modifier = modifier,
     )
+
+    // Error overlay: playback can't run — surfaced in the UI, never a crash. The
+    // UrlExpired branch covers P2-8: the owner pastes a fresh direct URL to recover.
+    val error = uiState.error
+    val rePasteInputState = remember { mutableStateOf("") }
+    if (error != null) {
+        val isExpired = error is UrlExpired
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text(error.message) },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (isExpired && uiState.title.isNotEmpty()) {
+                        Text(
+                            text = stringResource(R.string.player_error_expired_hint, uiState.title),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    if (isExpired) {
+                        OutlinedTextField(
+                            value = rePasteInputState.value,
+                            onValueChange = { rePasteInputState.value = it },
+                            label = { Text(stringResource(R.string.label_url)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            maxLines = 1,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (isExpired) {
+                            if (rePasteInputState.value.isNotBlank()) viewModel.rePaste(trackId, rePasteInputState.value)
+                        } else {
+                            onBack()
+                        }
+                    },
+                    enabled = !isExpired || rePasteInputState.value.isNotBlank(),
+                ) {
+                    Text(
+                        text = if (isExpired) stringResource(R.string.action_re_paste) else stringResource(R.string.player_error_back),
+                    )
+                }
+            },
+        )
+    }
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {

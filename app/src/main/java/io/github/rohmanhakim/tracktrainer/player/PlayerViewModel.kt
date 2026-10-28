@@ -12,6 +12,7 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.ExoPlayer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -21,9 +22,11 @@ import io.github.rohmanhakim.tracktrainer.data.local.SourceType
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackHealthChecker
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackRepository
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -41,8 +44,26 @@ data class PlayerUiState(
     /** Current playback speed (session-level; 0.25×–2×). */
     val speed: Float = 1f,
     /** Non-null = playback can't run (dead source, decode failure) — surfaced, never a crash. */
-    val error: String? = null,
+    val error: PlayerError? = null,
 )
+
+/** Why playback can't run — surfaced in the UI, never a crash. */
+sealed interface PlayerError {
+    val message: String
+}
+
+/** Decode or source failure unrelated to a stale URL. */
+object PlaybackFailed : PlayerError {
+    override val message = "Can't play this file"
+}
+
+/**
+ * Direct URL can't be served: the cache entry is gone and/or the URL expired (P2-8).
+ * Carries the track id so the UI can offer a re-paste action that targets this row.
+ */
+data class UrlExpired(val trackId: Long) : PlayerError {
+    override val message = "URL expired — paste a new one"
+}
 
 /**
  * Owns the ExoPlayer instance (T05 requirement): it outlives composition so rotation
@@ -56,6 +77,7 @@ class PlayerViewModel @Inject constructor(
     private val healthChecker: TrackHealthChecker,
     private val cacheDataSourceFactory: CacheDataSource.Factory,
     private val bookkeeper: CacheBookkeeper,
+    private val cache: SimpleCache,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlayerUiState())
@@ -83,7 +105,7 @@ class PlayerViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true, title = it.title) }
             val track = repository.getById(trackId)
             if (track == null) {
-                fail("Track not found")
+                fail(PlaybackFailed)
                 return@launch
             }
             _uiState.update { it.copy(title = track.title) }
@@ -91,7 +113,19 @@ class PlayerViewModel @Inject constructor(
             // re-reads the URI — a dead grant/file must surface here as an error,
             // never as a SecurityException inside ExoPlayer.
             if (healthChecker.findMissing(listOf(track)).isNotEmpty()) {
-                fail("File missing — re-link it in the library")
+                fail(PlaybackFailed)
+                return@launch
+            }
+            // P2-8: a direct track whose cached copy is gone can never play — prompt
+            // re-paste instead of attempting playback into a dead (expired) URL.
+            val cacheKey = cacheKeyFor(track)
+            if (
+                track.sourceType == SourceType.DIRECT &&
+                track.needsRefresh &&
+                cacheKey != null &&
+                !withContext(Dispatchers.IO) { isTrackCached(cacheKey) }
+            ) {
+                fail(UrlExpired(track.id))
                 return@launch
             }
             startPlayer(track)
@@ -189,7 +223,20 @@ class PlayerViewModel @Inject constructor(
 
             override fun onPlayerError(error: PlaybackException) {
                 Log.e(TAG, "Playback failed for ${track.sourceRef}", error)
-                fail("Can't play this file")
+                val trackId = openedTrackId
+                viewModelScope.launch {
+                    val key = currentCacheKey
+                    val covered =
+                        track.sourceType == SourceType.DIRECT &&
+                        key != null &&
+                        withContext(Dispatchers.IO) { isTrackCached(key) }
+                    if (trackId != null && track.sourceType == SourceType.DIRECT && !covered) {
+                        repository.update(track.copy(needsRefresh = true))
+                        fail(UrlExpired(trackId))
+                    } else {
+                        fail(PlaybackFailed)
+                    }
+                }
             }
         }
         player.addListener(listener)
@@ -277,11 +324,30 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    private fun fail(message: String) {
+    private fun fail(error: PlayerError) {
         releaseInternal()
         openedTrackId = null
-        _uiState.update { PlayerUiState(isLoading = false, error = message, title = it.title) }
+        _uiState.update { PlayerUiState(isLoading = false, error = error, title = it.title) }
     }
+
+    /**
+     * P2-8: the owner pasted a fresh URL for an expired direct track. Tear down the
+     * player, persist the new sourceRef (clearing needsRefresh), then reopen so the
+     * cache-backed pipeline retries with the fresh URL.
+     */
+    fun rePaste(trackId: Long, input: String) = viewModelScope.launch {
+        releasePlayer()
+        withContext(Dispatchers.IO) {
+            val track = repository.getById(trackId) ?: return@withContext
+            repository.update(track.copy(sourceRef = input, needsRefresh = false))
+        }
+        _uiState.update { it.copy(error = null) }
+        openTrack(trackId)
+    }
+
+    /** True when [cacheKey] has at least one byte cached from position 0. */
+    private fun isTrackCached(cacheKey: String): Boolean =
+        cache.getCachedSpans(cacheKey).any { it.isCached && it.position == 0L && it.length > 0 }
 
     private fun releaseInternal() {
         positionJob?.cancel()

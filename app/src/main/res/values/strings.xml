@@ -8,4 +8,28 @@
     <string name="player_play">Play</string>
     <string name="player_pause">Pause</string>
     <string name="library_offline">Offline</string>
+
+    <!-- T03 add-track chooser (§5.1, D10) -->
+    <string name="chooser_title">Add track</string>
+    <string name="chooser_local">📁 Local video</string>
+    <string name="chooser_local_sub">Pick a video file on this device</string>
+    <string name="chooser_youtube">▶ YouTube link</string>
+    <string name="chooser_youtube_sub">Paste a YouTube watch link</string>
+    <string name="chooser_direct">🔗 Direct media URL</string>
+    <string name="chooser_direct_sub">Paste a direct media stream URL</string>
+
+    <string name="hint_invalid_url">Please paste a valid link.</string>
+    <string name="hint_wrong_kind_youtube">That looks like a YouTube link — pick the YouTube option instead.</string>
+    <string name="hint_wrong_kind_direct">That looks like a direct media URL — pick the Direct media URL option instead.</string>
+
+    <string name="youtube_placeholder_title">YouTube track</string>
+
+    <!-- T03 P2-8: expired direct URL -->
+    <string name="error_url_expired">URL expired — paste a new one</string>
+    <string name="action_re_paste">Re-paste</string>
+    <string name="re_paste_title">Paste a new link for this track</string>
+    <string name="player_error_expired_hint">Paste a fresh stream URL for “%s”.</string>
+    <string name="player_error_back">Back</string>
+    <string name="button_add">Add</string>
+    <string name="label_url">URL</string>
 </resources>
