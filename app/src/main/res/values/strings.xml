@@ -22,7 +22,11 @@
     <string name="hint_wrong_kind_youtube">That looks like a YouTube link — pick the YouTube option instead.</string>
     <string name="hint_wrong_kind_direct">That looks like a direct media URL — pick the Direct media URL option instead.</string>
 
-    <string name="youtube_placeholder_title">YouTube track</string>
+    <!-- T04 YouTube add flow (P2-1, P2-2) -->
+    <string name="youtube_added">Added “%s”</string>
+    <string name="tt_youtube_resolve_failed">Could not resolve this YouTube link</string>
+    <string name="hint_extraction_fallback">Try a direct media URL or import a local file instead.</string>
+    <string name="resolving_link">Resolving link… this can take 30–60 s</string>
 
     <!-- T03 P2-8: expired direct URL -->
     <string name="error_url_expired">URL expired — paste a new one</string>

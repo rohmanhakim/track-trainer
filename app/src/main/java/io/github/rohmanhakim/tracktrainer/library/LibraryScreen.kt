@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
@@ -42,8 +43,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import java.io.File
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil3.compose.AsyncImage
 import io.github.rohmanhakim.tracktrainer.R
 import io.github.rohmanhakim.tracktrainer.data.local.Track
 
@@ -64,6 +67,7 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isResolving by viewModel.resolving.collectAsStateWithLifecycle(false)
     val snackbarHostState = remember { SnackbarHostState() }
 
     // SAF picker: reference-only pick, no copy (D11); launcher must outlive recomposition.
@@ -177,17 +181,26 @@ fun LibraryScreen(
                 value = pasteInput,
                 onValueChange = { pasteInput = it },
                 onAdd = {
+                    // Don't close here: the ViewModel keeps resolving = true until extraction
+                    // finishes, and the LaunchedEffect below closes the dialog then.
                     viewModel.addUrl(pasteInput, state.kind)
-                    chooserState = ChooserState.Closed
-                    pasteInput = ""
                 },
                 onDismiss = {
                     chooserState = ChooserState.Closed
                     pasteInput = ""
                 },
+                isResolving = isResolving && state.kind == UrlKind.YouTube,
             )
         }
         else -> Unit
+    }
+
+    // Close the paste dialog once extraction completes (success or failure).
+    LaunchedEffect(isResolving) {
+        if (!isResolving && chooserState is ChooserState.Pasting) {
+            chooserState = ChooserState.Closed
+            pasteInput = ""
+        }
     }
 }
 
@@ -198,21 +211,38 @@ private fun PasteDialog(
     onValueChange: (String) -> Unit,
     onAdd: () -> Unit,
     onDismiss: () -> Unit,
+    isResolving: Boolean = false,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.re_paste_title)) },
         text = {
-            OutlinedTextField(
-                value = value,
-                onValueChange = onValueChange,
-                label = { Text(stringResource(R.string.label_url)) },
-                modifier = Modifier.fillMaxWidth(),
-                maxLines = 1,
-            )
+            Column {
+                if (isResolving) {
+                    Text(
+                        text = stringResource(R.string.resolving_link),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    CircularProgressIndicator(modifier = Modifier.fillMaxWidth())
+                } else {
+                    OutlinedTextField(
+                        value = value,
+                        onValueChange = onValueChange,
+                        label = { Text(stringResource(R.string.label_url)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 1,
+                    )
+                }
+            }
         },
         confirmButton = {
-            TextButton(onClick = onAdd) { Text(stringResource(R.string.button_add)) }
+            if (isResolving) {
+                TextButton(onClick = onAdd, enabled = false) {
+                    Text(stringResource(R.string.button_add))
+                }
+            } else {
+                TextButton(onClick = onAdd) { Text(stringResource(R.string.button_add)) }
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) }
@@ -232,6 +262,15 @@ private fun TrackRow(
         // Missing rows stay tappable: the player health-checks on open and shows the
         // error there (T04's "on track open" check) instead of crashing.
         modifier = Modifier.clickable(onClick = onClick),
+        leadingContent = {
+            track.thumbnailPath?.let { path ->
+                AsyncImage(
+                    model = File(path),
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                )
+            }
+        },
         headlineContent = {
             Text(track.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
         },

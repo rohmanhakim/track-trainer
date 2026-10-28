@@ -17,12 +17,18 @@ import io.github.rohmanhakim.tracktrainer.data.local.Track
 import io.github.rohmanhakim.tracktrainer.data.prefs.AppPreferences
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackHealthChecker
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackRepository
+import io.github.rohmanhakim.tracktrainer.youtube.Extractor
+import io.github.rohmanhakim.tracktrainer.youtube.ExtractionException
 import javax.inject.Inject
+import java.io.File
+import java.net.URL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -45,6 +51,7 @@ class LibraryViewModel @Inject constructor(
     private val repository: TrackRepository,
     private val healthChecker: TrackHealthChecker,
     private val preferences: AppPreferences,
+    private val extractor: Extractor,
 ) : ViewModel() {
 
     /**
@@ -62,6 +69,10 @@ class LibraryViewModel @Inject constructor(
 
     private val _messages = Channel<String>(Channel.BUFFERED)
     val messages: Flow<String> = _messages.receiveAsFlow()
+
+    /** True while a YouTube link is being resolved (~30–60 s). Gates the paste-dialog UI. */
+    private val _resolving = MutableStateFlow(false)
+    val resolving: StateFlow<Boolean> = _resolving.asStateFlow()
 
     /** One-shot "add track" job; safe to re-enter, failures surface as a snackbar. */
     fun addTrack(uri: Uri) {
@@ -120,17 +131,31 @@ class LibraryViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                when (chosenKind) {
+            _resolving.value = true
+            try {
+                withContext(Dispatchers.IO) {
+                    when (chosenKind) {
                     is UrlKind.YouTube -> {
-                        repository.add(
-                            Track(
-                                sourceType = SourceType.YOUTUBE,
-                                sourceRef = input,
-                                youtubeId = extractYouTubeVideoId(input),
-                                title = context.getString(R.string.youtube_placeholder_title),
+                        val resolved = withContext(Dispatchers.IO) { extractor.resolve(input) }
+                        // Thumbnail is best-effort: a failed download never fails the add.
+                        val thumbnailPath = resolved.thumbnailUrl?.let { thumbnailUrl: String ->
+                            downloadThumbnail(resolved.videoId, thumbnailUrl)
+                        }
+                        withContext(Dispatchers.IO) {
+                            repository.add(
+                                Track(
+                                    sourceType = SourceType.YOUTUBE,
+                                    sourceRef = input,
+                                    streamUrl = resolved.progressiveUrl,
+                                    youtubeId = resolved.videoId,
+                                    itag = resolved.itag,
+                                    title = resolved.title,
+                                    durationMs = resolved.durationMs,
+                                    thumbnailPath = thumbnailPath,
+                                )
                             )
-                        )
+                        }
+                        _messages.trySend(context.getString(R.string.youtube_added, resolved.title))
                     }
                     is UrlKind.Direct -> {
                         repository.add(
@@ -143,6 +168,13 @@ class LibraryViewModel @Inject constructor(
                     }
                     is UrlKind.Invalid -> Unit
                 }
+            }
+            } catch (e: ExtractionException) {
+                Log.w(TAG, "YouTube extraction failed for $input", e)
+                _messages.trySend(context.getString(R.string.tt_youtube_resolve_failed))
+                _messages.trySend(context.getString(R.string.hint_extraction_fallback))
+            } finally {
+                _resolving.value = false
             }
         }
     }
@@ -238,6 +270,22 @@ class LibraryViewModel @Inject constructor(
             0L
         } finally {
             retriever.release()
+        }
+    }
+
+    /** Best-effort thumbnail download to `filesDir/thumbnails/<videoId>.jpg`. Never fails the add. */
+    private suspend fun downloadThumbnail(videoId: String, thumbnailUrl: String): String? {
+        return try {
+            val thumbDir = File(context.filesDir, "thumbnails")
+            thumbDir.mkdirs()
+            val file = File(thumbDir, "$videoId.jpg")
+            URL(thumbnailUrl).openStream().use { input ->
+                file.outputStream().use { output -> input.copyTo(output) }
+            }
+            file.absolutePath
+        } catch (e: Exception) {
+            Log.w(TAG, "Thumbnail download failed for $videoId", e)
+            null
         }
     }
 

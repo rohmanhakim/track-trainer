@@ -19,8 +19,11 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.rohmanhakim.tracktrainer.cache.CacheBookkeeper
 import io.github.rohmanhakim.tracktrainer.cache.CacheKeyFactory
 import io.github.rohmanhakim.tracktrainer.data.local.SourceType
+import io.github.rohmanhakim.tracktrainer.data.local.Track
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackHealthChecker
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackRepository
+import io.github.rohmanhakim.tracktrainer.youtube.Extractor
+import io.github.rohmanhakim.tracktrainer.youtube.ExtractionException
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,7 +35,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import io.github.rohmanhakim.tracktrainer.data.local.Track
 
 /** What the player screen renders: one track's transport state. */
 data class PlayerUiState(
@@ -65,6 +67,11 @@ data class UrlExpired(val trackId: Long) : PlayerError {
     override val message = "URL expired — paste a new one"
 }
 
+/** YouTube extraction failed — offer fallback ladder hints (direct URL paste / local import). */
+data class ExtractionFailed(val trackId: Long) : PlayerError {
+    override val message = "Couldn't play this YouTube video. Try a direct media URL or import a local file instead."
+}
+
 /**
  * Owns the ExoPlayer instance (T05 requirement): it outlives composition so rotation
  * keeps playback (P1-4), and is torn down on back-navigation / ViewModel clearing so
@@ -78,6 +85,7 @@ class PlayerViewModel @Inject constructor(
     private val cacheDataSourceFactory: CacheDataSource.Factory,
     private val bookkeeper: CacheBookkeeper,
     private val cache: SimpleCache,
+    private val extractor: Extractor,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlayerUiState())
@@ -92,6 +100,8 @@ class PlayerViewModel @Inject constructor(
     private var currentCacheKey: String? = null
     /** Session-level speed; reapplied to each fresh ExoPlayer in [startPlayer], preserved across tracks. */
     private var currentSpeed = 1f
+    /** One re-extraction attempt per open (prevents loops on YOUTUBE playback failure). */
+    private var reextractAttempted = false
     private var positionJob: Job? = null
     private var playerListener: Player.Listener? = null
 
@@ -101,6 +111,7 @@ class PlayerViewModel @Inject constructor(
      */
     fun openTrack(trackId: Long) {
         if (trackId == openedTrackId && _player.value != null) return
+        reextractAttempted = false
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, title = it.title) }
             val track = repository.getById(trackId)
@@ -114,6 +125,25 @@ class PlayerViewModel @Inject constructor(
             // never as a SecurityException inside ExoPlayer.
             if (healthChecker.findMissing(listOf(track)).isNotEmpty()) {
                 fail(PlaybackFailed)
+                return@launch
+            }
+            // YOUTUBE: cache hit ⇒ zero extraction, play from stored streamUrl.
+            // Cache miss / stale URL ⇒ extract a fresh progressive URL, then play.
+            if (track.sourceType == SourceType.YOUTUBE) {
+                val cacheKey = cacheKeyFor(track)
+                if (cacheKey != null && withContext(Dispatchers.IO) { isTrackCached(cacheKey) }) {
+                    Log.d(TAG, "cache hit — zero extraction for YouTube track $trackId (key=$cacheKey)")
+                    startPlayer(track)
+                    return@launch
+                }
+                val resolved = withContext(Dispatchers.IO) { extractor.resolve(track.sourceRef) }
+                val updatedTrack = track.copy(
+                    streamUrl = resolved.progressiveUrl,
+                    itag = resolved.itag,
+                    needsRefresh = false,
+                )
+                withContext(Dispatchers.IO) { repository.update(updatedTrack) }
+                startPlayer(updatedTrack)
                 return@launch
             }
             // P2-8: a direct track whose cached copy is gone can never play — prompt
@@ -200,8 +230,11 @@ class PlayerViewModel @Inject constructor(
         // http(s) items are served through the disk cache (read-through: streams while
         // writing). Local SAF references play untouched — P1 regression guard.
         currentCacheKey = cacheKeyFor(track)
+        // YouTube: serve the resolved progressive streamUrl through the cache (never the
+        // watch URL — R6). LOCAL/DIRECT play sourceRef untouched (P1/P2-8 regression guard).
+        val mediaUri = if (track.sourceType == SourceType.YOUTUBE) track.streamUrl ?: track.sourceRef else track.sourceRef
         val mediaItem = MediaItem.Builder()
-            .setUri(track.sourceRef)
+            .setUri(mediaUri)
             .apply { currentCacheKey?.let { setCustomCacheKey(it) } }
             .build()
         val listener = object : Player.Listener {
@@ -226,16 +259,39 @@ class PlayerViewModel @Inject constructor(
                 val trackId = openedTrackId
                 viewModelScope.launch {
                     val key = currentCacheKey
-                    val covered =
-                        track.sourceType == SourceType.DIRECT &&
-                        key != null &&
-                        withContext(Dispatchers.IO) { isTrackCached(key) }
-                    if (trackId != null && track.sourceType == SourceType.DIRECT && !covered) {
-                        repository.update(track.copy(needsRefresh = true))
-                        fail(UrlExpired(trackId))
-                    } else {
-                        fail(PlaybackFailed)
+                    // DIRECT: existing UrlExpired logic — cache miss ⇒ prompt re-paste.
+                    if (track.sourceType == SourceType.DIRECT) {
+                        val covered = key != null && withContext(Dispatchers.IO) { isTrackCached(key) }
+                        if (trackId != null && !covered) {
+                            repository.update(track.copy(needsRefresh = true))
+                            fail(UrlExpired(trackId))
+                        } else {
+                            fail(PlaybackFailed)
+                        }
+                        return@launch
                     }
+                    // YOUTUBE: one re-extraction attempt on playback failure (e.g. expired
+                    // streamUrl). If re-extract also fails ⇒ ExtractionFailed with ladder hints.
+                    if (track.sourceType == SourceType.YOUTUBE && trackId != null && !reextractAttempted) {
+                        reextractAttempted = true
+                        val currentTrack = repository.getById(trackId)
+                        if (currentTrack == null) { fail(PlaybackFailed); return@launch }
+                        try {
+                            val resolved = withContext(Dispatchers.IO) { extractor.resolve(currentTrack.sourceRef) }
+                            val retryTrack = currentTrack.copy(
+                                streamUrl = resolved.progressiveUrl,
+                                itag = resolved.itag,
+                                needsRefresh = false,
+                            )
+                            withContext(Dispatchers.IO) { repository.update(retryTrack) }
+                            _uiState.update { it.copy(isLoading = true, error = null) }
+                            startPlayer(retryTrack)
+                        } catch (e: ExtractionException) {
+                            fail(ExtractionFailed(trackId))
+                        }
+                        return@launch
+                    }
+                    fail(PlaybackFailed)
                 }
             }
         }

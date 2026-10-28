@@ -5,10 +5,12 @@ data class ResolvedVideo(
     val videoId: String,
     val title: String,
     val durationMs: Long,
-    /** itag of the selected progressive (muxed A/V) stream. */
+    /** itag of the selected progressive (muxed A/V) stream — part of the stable cache key. */
     val itag: String,
     /** Direct progressive media URL (feed it straight into ExoPlayer / CacheDataSource). */
     val progressiveUrl: String,
+    /** Thumbnail URL from yt-dlp; the add flow downloads it to `filesDir/thumbnails/<videoId>.jpg`. */
+    val thumbnailUrl: String?,
 )
 
 /** Thrown when YouTube extraction fails for any reason. */

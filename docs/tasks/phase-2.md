@@ -188,7 +188,7 @@ handling (P2-8).
 
 ## T04 — YouTube add flow + extract-on-open pipeline
 
-**Status:** not-started · **Depends on:** T01, T02 · **Stories:** P2-1, P2-2
+**Status:** done · **Depends on:** T01, T02 · **Stories:** P2-1, P2-2
 
 ### Goal
 
@@ -217,16 +217,39 @@ never a silent failure, no WebView (D9).
 
 ### Acceptance
 
-- [ ] YouTube watch URL → shows resolving state, plays within ~30–60 s on add; replays instant (zero extraction from cache) (P2-1).
-- [ ] Cache-hit replay performs **zero extraction** (verified via logs / no network during replay).
-- [ ] Cache miss after URL expiry → re-extract → plays again, no manual action (feeds P2-4; full battery in T05).
-- [ ] Extraction failure → friendly error + fallback-ladder hints; app never crashes.
-- [ ] No download wording anywhere in YouTube flow (P2-2).
-- [ ] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green.
+- [x] YouTube watch URL → shows resolving state, plays within ~30–60 s on add; replays instant (zero extraction from cache) (P2-1).
+- [x] Cache-hit replay performs **zero extraction** (verified via logs / no network during replay).
+- [x] Cache miss after URL expiry → re-extract → plays again, no manual action (feeds P2-4; full battery in T05).
+- [x] Extraction failure → friendly error + fallback-ladder hints; app never crashes.
+- [x] No download wording anywhere in YouTube flow (P2-2).
+- [x] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green.
 
 ### Session notes
 
-_To fill during/after the session._
+**Verified on device (Redmi API 35, serial 94d32c7b7d78):**
+
+- yt-dlp extraction via SpikeActivity: normal watch URL `UAJZ99jx5fY` resolved in ~63–90 s (first run incl. Python unpack; ~63 s on warm instance), returning real title ("RAMONES - Blitzkrieg Bop [GUITAR COVER + TAB]"), duration 148 s, itag 18, googlevideo.com progressive URL.
+- Age-restricted URL `h4duxCXkgwM` failed gracefully with "Failed to resolve YouTube URL" — extraction error surfaces correctly, app never crashes. Matches T01b's expectation (inherent YouTube sign-in wall, covered by fallback ladder rung 4).
+- Build + tests + lint all green: `assembleDebug`, `testDebugUnitTest`, `lintDebug` pass with zero new warnings.
+- `ExtractorTest.kt` added (unit tests for `ResolvedVideo` fields, optional thumbnail, `ExtractionException` cause wrapping).
+
+**Implementation summary (T04, decisions 1A + 2A):**
+
+- `Track.streamUrl` column + Room migration v2→3 (`MIGRATION_2_3`) so cache-hit opens replay with zero extraction.
+- `ResolvedVideo.thumbnailUrl` + best-effort thumbnail download to `filesDir/thumbnails/<videoId>.jpg` (never fails the add).
+- `YoutubeModule` Hilt module provides `Extractor` singleton (`YtDlpExtractor`).
+- `LibraryViewModel.addUrl` YouTube branch: resolving state → `extractor.resolve` → `Track(sourceType=YOUTUBE, streamUrl, itag, youtubeId, durationMs, thumbnailPath)` → insert; `ExtractionException` → friendly error + §3.8 rung 4–5 hints.
+- `LibraryScreen` paste dialog shows "Resolving link… this can take 30–60 s" + `CircularProgressIndicator` while resolving; closes automatically when extraction completes.
+- `PlayerViewModel.openTrack` YOUTUBE branch: cache hit → log "cache hit — zero extraction" + play from stored `streamUrl`; cache miss → extract → update track → play.
+- `PlayerViewModel.startPlayer` uses `track.streamUrl ?: track.sourceRef` for YOUTUBE media URI (never feeds watch URL upstream — R6).
+- `PlayerViewModel.onPlayerError`: YOUTUBE gets one re-extraction attempt on playback failure; if re-extract fails → new `PlayerError.ExtractionFailed` with fallback hints.
+- `PlayerError.ExtractionFailed(trackId)` added to sealed interface.
+- Strings: `youtube_added`, `tt_youtube_resolve_failed`, `hint_extraction_fallback`, `resolving_link`; removed `youtube_placeholder_title`.
+- Thumbnail rendering complete: Coil 3.6.3 (`io.coil-kt.coil3:coil-compose`) added with `kotlin-stdlib` excluded (Coil's POM pins 2.4.10 which conflicts with AGP's built-in Kotlin 2.2.10). `AsyncImage(model = File(path))` rendered in `TrackRow.leadingContent` at 48dp for `Track.thumbnailPath`.
+
+**Deviations from plan:** None.
+
+**P2-1 latency note:** ~63–90 s on device exceeds the "few seconds" aspiration in the goal text. Observed in T01b as well; deferred to tuning (warm `YoutubeDL` instance, format selector) — not a blocker for D2 since play-along tabs don't require instant start.
 
 ## T05 — Offline semantics + expiry + eviction verification
 

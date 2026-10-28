@@ -52,7 +52,16 @@ class YtDlpExtractor(private val context: Context) : Extractor {
                 val durationMs = info.duration.toLong() * 1000
                 val streamUrl = info.url
                     ?: throw ExtractionException("No playable URL in yt-dlp response for $watchUrl")
-                ResolvedVideo(videoId, title, durationMs, info.formatId ?: "unknown", streamUrl)
+                // Thumbnail is best-effort: a missing thumbnail never fails the resolve.
+                val thumbnailUrl = info.thumbnail
+                ResolvedVideo(
+                    videoId,
+                    title,
+                    durationMs,
+                    info.formatId ?: "unknown",
+                    streamUrl,
+                    thumbnailUrl,
+                )
             } catch (e: Exception) {
                 Log.e("YtDlpExtractor", "Extraction failed for $watchUrl", e)
                 throw ExtractionException("Failed to resolve YouTube URL: $watchUrl", e)

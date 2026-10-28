@@ -11,6 +11,8 @@ data class Track(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val sourceType: SourceType,
     val sourceRef: String,
+    /** Last resolved playable stream URL (YouTube only) — replays hit cache with zero extraction. */
+    val streamUrl: String? = null,
     val title: String,
     val youtubeId: String? = null,
     /** itag of the selected progressive stream (YouTube only) — part of the stable cache key. */
