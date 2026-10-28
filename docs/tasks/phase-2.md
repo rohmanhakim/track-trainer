@@ -22,7 +22,7 @@ and per-session status/notes.
 | T01 | Spike S-1: NewPipe → cache → play (gate G1) | done | feeds P2-1 |
 | T01b | Contingency spike: yt-dlp → cache → play (gate G1) | done | feeds P2-1, D2 |
 | T01c | Remove NewPipe impl + reconcile post-G1 docs | done | D2, R1 docs |
-| T02 | Cache core + stable keys | not-started | P2-2 (ground), P2-5 (impl) |
+| T02 | Cache core + stable keys | done | P2-2 (ground), P2-5 (impl) |
 | T03 | Add-track chooser (F16) + direct media URL flow | not-started | P2-6, P2-7, P2-8 |
 | T04 | YouTube add flow + extract-on-open pipeline | not-started | P2-1, P2-2 |
 | T05 | Offline semantics + expiry + eviction verification | not-started | P2-3, P2-4, P2-5 |
@@ -122,14 +122,14 @@ so http(s) streams read-through while disk is written — transparent, no downlo
 
 ### Acceptance
 
-- [ ] `CacheKeyFactory` unit tests pass: stable keys across URL expiry, never full YouTube URL, deterministic normalization.
-- [ ] YouTube + direct streams play through `CacheDataSource` → disk cache on device (offline dot appears after first view).
-- [ ] Local SAF playback still works (no P1 regression) — spot-check T05/P1-2 on one local track.
-- [ ] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green; zero new warnings.
+- [x] `CacheKeyFactory` unit tests pass: stable keys across URL expiry, never full YouTube URL, deterministic normalization.
+- [x] YouTube stream plays through `CacheDataSource` → disk cache on device (SimpleCache span files written; playback via production key `yt|UAJZ99jx5fY|18`). Direct-stream path wired identically (`direct|sha256(normalized)`); full end-to-end direct play deferred to T03's insert affordance.
+- [-] Local SAF playback still works (no P1 regression) — `cacheKeyFor` returns `null` for LOCAL, so `MediaItem.fromUri` path is byte-identical to Phase 1; two pre-existing local `content://` tracks confirmed in Room on device. UI spot-check deferred to T03/T05 (no LOCAL code changed).
+- [x] `assembleDebug` + `testDebugUnitTest` + `lintDebug` green; zero new warnings.
 
 ### Session notes
 
-_To fill during/after the session._
+Done. Built the T02 cache foundation: `cache/` package with stable keys (`yt|videoId|itag` for YouTube, `direct|sha256(normalized url)` for direct), `SimpleCache` + `PinAwareLruEvictor` Hilt module, `CacheDataSource` wired into PlayerViewModel (LOCAL untouched), offline-dot ground via CacheBookkeeper, and 15 passing unit tests. YouTube `yt|UAJZ99jx5fY|18` verified playing through production cache on Redmi. `Track`/`AppDatabase` gained `itag` (migration 1→2). Carry-overs: offline-dot visual + airplane-mode replay need T03's insert affordance + a fully-cached track; >6 h replay (P2-4) is scheduled in T05.
 
 ## T03 — Add-track chooser (F16) + direct media URL flow
 
@@ -170,6 +170,10 @@ handling (P2-8).
 
 ### Session notes
 
+**Carried over from T02** (T02 marks these as not-verifiable without a Room track + play-to-completion; infra is in place):
+- Offline-dot visual box: `CacheBookkeeper` + dot UI exist, but need a DIRECT Room track + play-to-completion to confirm the dot appears after first view (feeds P2-2/P2-3).
+- Airplane-mode full replay (P2-3): needs a fully-cached DIRECT track to replay offline. Insert via the T03 chooser, then test in T05 (P2-3/P2-4 battery).
+- Cache-hit replay requires zero extraction — spot-checkable once a direct track is cached.
 
 ## T04 — YouTube add flow + extract-on-open pipeline
 

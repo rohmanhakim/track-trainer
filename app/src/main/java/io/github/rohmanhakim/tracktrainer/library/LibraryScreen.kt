@@ -6,10 +6,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -18,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -101,6 +105,7 @@ fun LibraryScreen(
                     TrackRow(
                         track = track,
                         missing = track.id in uiState.missingIds,
+                        offline = track.offline,
                         onRelink = {
                             pendingRelinkId = track.id
                             pickLauncher.launch(VIDEO_MIME_TYPES)
@@ -115,7 +120,13 @@ fun LibraryScreen(
 }
 
 @Composable
-private fun TrackRow(track: Track, missing: Boolean, onRelink: () -> Unit, onClick: () -> Unit) {
+private fun TrackRow(
+    track: Track,
+    missing: Boolean,
+    offline: Boolean,
+    onRelink: () -> Unit,
+    onClick: () -> Unit,
+) {
     ListItem(
         // Missing rows stay tappable: the player health-checks on open and shows the
         // error there (T04's "on track open" check) instead of crashing.
@@ -140,14 +151,24 @@ private fun TrackRow(track: Track, missing: Boolean, onRelink: () -> Unit, onCli
                 }
             }
         },
-        trailingContent = if (missing) {
-            {
-                TextButton(onClick = onRelink) {
-                    Text(stringResource(R.string.library_relink))
+        trailingContent = {
+            Row(modifier = Modifier.size(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Subtle offline dot: the track has played to completion once, so every
+                // byte is on disk and airplane-mode replay works (P2-3). No "download"
+                // wording anywhere — the dot is the whole UI (P2-2).
+                if (offline && !missing) {
+                    Surface(
+                        modifier = Modifier.size(8.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                    ) { }
+                }
+                if (missing) {
+                    TextButton(onClick = onRelink) {
+                        Text(stringResource(R.string.library_relink))
+                    }
                 }
             }
-        } else {
-            null
         },
     )
 }

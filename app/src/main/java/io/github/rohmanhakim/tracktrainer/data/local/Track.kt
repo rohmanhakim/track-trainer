@@ -13,6 +13,8 @@ data class Track(
     val sourceRef: String,
     val title: String,
     val youtubeId: String? = null,
+    /** itag of the selected progressive stream (YouTube only) — part of the stable cache key. */
+    val itag: String? = null,
     val durationMs: Long = 0L,
     val thumbnailPath: String? = null,
     val offline: Boolean = false,

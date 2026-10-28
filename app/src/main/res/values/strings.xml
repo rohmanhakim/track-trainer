@@ -7,4 +7,5 @@
     <string name="player_back">Back</string>
     <string name="player_play">Play</string>
     <string name="player_pause">Pause</string>
+    <string name="library_offline">Offline</string>
 </resources>

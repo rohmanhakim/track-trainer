@@ -30,16 +30,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Spacer
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
-import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
-import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 import io.github.rohmanhakim.tracktrainer.cache.CacheKeyFactory
+import io.github.rohmanhakim.tracktrainer.data.local.SourceType
+import io.github.rohmanhakim.tracktrainer.data.local.Track
+import io.github.rohmanhakim.tracktrainer.data.repo.TrackRepository
 import io.github.rohmanhakim.tracktrainer.youtube.Extractor
 import io.github.rohmanhakim.tracktrainer.youtube.YtDlpExtractor
 import com.yausername.youtubedl_android.YoutubeDL
@@ -47,14 +49,25 @@ import com.yausername.youtubedl_android.YoutubeDL
 /**
  * Throwaway T01b spike harness (yt-dlp, the D2 primary extractor).
  *
+ * Plays through the PRODUCTION cache wiring (Hilt-provided SimpleCache + CacheDataSource.Factory
+ * from [CacheModule]) so the T01 resolve->cache->play path is verified on real code, not a
+ * throwaway cache instance.
+ *
  * adb: am start -n io.github.rohmanhakim.tracktrainer/io.github.rohmanhakim.tracktrainer.youtube.spike.SpikeActivity
  *   -e url "<watch url>"      # auto-resolve on launch (battery mode)
  *   -e update 1               # refresh bundled yt-dlp binary before resolving
  *
- * Paste a YouTube watch URL -> Resolve (calls YtDlpExtractor) -> Play (feeds progressive URL into
- * Media3 CacheDataSource -> ExoPlayer). Status shown on screen.
+ * Buttons:
+ *   Resolve & play (YouTube)  - yt-dlp resolve -> play progressive URL under key yt|videoId|itag
+ *   Play direct as-is         - play the pasted stream URL under key direct|sha256(normalized url)
+ *   Insert direct track       - store a DIRECT track in Room so the real library/player path
+ *                               (PlayerViewModel + offline dot) can be exercised end-to-end
  */
+@AndroidEntryPoint
 class SpikeActivity : ComponentActivity() {
+    @Inject lateinit var cacheDataSourceFactory: CacheDataSource.Factory
+    @Inject lateinit var repository: TrackRepository
+
     private lateinit var extractor: Extractor
     private lateinit var player: ExoPlayer
     private val _status = mutableStateOf("Paste a YouTube watch URL and tap Resolve.")
@@ -63,6 +76,10 @@ class SpikeActivity : ComponentActivity() {
     private var urlToResolve: String? = null
     /** Whether to update the bundled yt-dlp binary before resolving ("1" = yes). */
     private var doUpdate: Boolean = false
+    /** Last resolved progressive URL / video id / itag, for the play buttons. */
+    private var lastUrl = ""
+    private var lastVideoId = ""
+    private var lastItag = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -105,20 +122,20 @@ class SpikeActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun play(progressiveUrl: String, itag: String) {
-        val cache = SimpleCache(
-            applicationContext.cacheDir,
-            LeastRecentlyUsedCacheEvictor(1024L * 1024L * 512L),
-        )
-        val dataSourceFactory = CacheDataSource.Factory()
-            .setCache(cache)
-            .setUpstreamDataSourceFactory(DefaultHttpDataSource.Factory())
-        val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
-            .createMediaSource(MediaItem.fromUri(progressiveUrl))
+    private suspend fun play(mediaUrl: String, cacheKey: String) {
+        withContext(Dispatchers.Main) {
+            val mediaItem = MediaItem.Builder()
+            .setUri(mediaUrl)
+            .setCustomCacheKey(cacheKey)
+            .build()
+        val mediaSource = ProgressiveMediaSource.Factory(cacheDataSourceFactory)
+            .createMediaSource(mediaItem)
         player.setMediaSource(mediaSource)
         player.prepare()
         player.playWhenReady = true
-        _status.value = "Playing $itag ... (watch logcat / player view)"
+        _status.value = "Playing ... key=$cacheKey"
+        Log.d("T01SPIKE", "PLAY key=$cacheKey url=$mediaUrl")
+        }
     }
 
     @Composable
@@ -126,10 +143,11 @@ class SpikeActivity : ComponentActivity() {
         val scope = rememberCoroutineScope()
         var url by remember { mutableStateOf("") }
         var lastUrl by remember { mutableStateOf("") }
+        var lastVideoId by remember { mutableStateOf("") }
         var lastItag by remember { mutableStateOf("") }
 
         // Auto-resolve when launched via intent extra.
-        LaunchedEffect(urlToResolve) {
+        LaunchedEffect(urlToResolve) spike@ {
             val target = urlToResolve
             if (target != null && target.isNotEmpty()) {
                 val result = withContext(Dispatchers.IO) {
@@ -137,16 +155,53 @@ class SpikeActivity : ComponentActivity() {
                         val start = System.currentTimeMillis()
                         val resolved = extractor.resolve(target)
                         lastUrl = resolved.progressiveUrl
+                        lastVideoId = resolved.videoId
                         lastItag = resolved.itag
                         "RESOLVED in ${System.currentTimeMillis() - start} ms\nTitle: ${resolved.title}\nVideoId: ${resolved.videoId}\n" +
                             "Duration: ${resolved.durationMs} ms\nItag: ${resolved.itag}\nURL: ${resolved.progressiveUrl}"
                     } catch (e: Exception) {
                         lastUrl = ""
+                        lastVideoId = ""
                         "RESOLVE FAILED: ${e.message}"
                     }
                 }
                 onStatus(result)
                 Log.d("T01SPIKE", "RESULT: $result")
+                // Unattended battery mode.
+                if (intent.getStringExtra("play") == "1") {
+                    val directTarget = if (lastUrl.isEmpty()) urlToResolve else null
+                    launch {
+                        if (lastUrl.isNotEmpty()) {
+                            withContext(Dispatchers.IO) {
+                                play(lastUrl, CacheKeyFactory.youtubeKey(lastVideoId, lastItag))
+                            }
+                        } else {
+                            directTarget?.let { target ->
+                                withContext(Dispatchers.IO) {
+                                    play(target, CacheKeyFactory.directKey(target))
+                                }
+                            }
+                        }
+                    }
+                }
+                // Store a DIRECT track in Room so the real library/player path can be exercised.
+                if (intent.getStringExtra("insert") == "1") {
+                    urlToResolve?.let { target ->
+                        launch {
+                            val id = withContext(Dispatchers.IO) {
+                                repository.add(
+                                    Track(
+                                        sourceType = SourceType.DIRECT,
+                                        sourceRef = target,
+                                        title = "Direct track",
+                                        durationMs = 0L,
+                                    ),
+                                )
+                            }
+                            Log.d("T01SPIKE", "INSERTED direct track id=$id")
+                        }
+                    }
+                }
             }
         }
 
@@ -179,11 +234,13 @@ class SpikeActivity : ComponentActivity() {
                                         val start = System.currentTimeMillis()
                                         val resolved = extractor.resolve(url)
                                         lastUrl = resolved.progressiveUrl
+                                        lastVideoId = resolved.videoId
                                         lastItag = resolved.itag
                                         "RESOLVED in ${System.currentTimeMillis() - start} ms\nTitle: ${resolved.title}\nVideoId: ${resolved.videoId}\n" +
                                             "Duration: ${resolved.durationMs} ms\nItag: ${resolved.itag}\nURL: ${resolved.progressiveUrl}"
                                     } catch (e: Exception) {
                                         lastUrl = ""
+                                        lastVideoId = ""
                                         "RESOLVE FAILED: ${e.message}"
                                     }
                                 }
@@ -191,17 +248,59 @@ class SpikeActivity : ComponentActivity() {
                                 Log.d("T01SPIKE", "RESULT: $result")
                             }
                         },
-                    ) { Text(text = "Resolve") }
+                    ) { Text(text = "Resolve & play (YouTube)") }
                     Button(
                         onClick = {
                             if (lastUrl.isNotEmpty()) {
                                 scope.launch {
-                                    withContext(Dispatchers.IO) { play(lastUrl, lastItag) }
+                                    withContext(Dispatchers.IO) {
+                                        play(
+                                            lastUrl,
+                                            CacheKeyFactory.youtubeKey(lastVideoId, lastItag),
+                                        )
+                                    }
                                 }
                             }
                         },
                         enabled = lastUrl.isNotEmpty(),
-                    ) { Text(text = "Play") }
+                    ) { Text(text = "Play resolved") }
+                    Button(
+                        onClick = {
+                            if (url.isNotEmpty()) {
+                                scope.launch {
+                                    withContext(Dispatchers.IO) {
+                                        play(url, CacheKeyFactory.directKey(url))
+                                    }
+                                }
+                            }
+                        },
+                        enabled = url.isNotEmpty(),
+                    ) { Text(text = "Play direct as-is") }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = {
+                            if (url.isNotEmpty()) {
+                                scope.launch {
+                                    val id = withContext(Dispatchers.IO) {
+                                        repository.add(
+                                            Track(
+                                                sourceType = SourceType.DIRECT,
+                                                sourceRef = url,
+                                                title = "Direct track",
+                                                durationMs = 0L,
+                                            ),
+                                        )
+                                    }
+                                    onStatus("Inserted direct track id=$id — open it from the library")
+                                }
+                            }
+                        },
+                        enabled = url.isNotEmpty(),
+                    ) { Text(text = "Insert direct track into library") }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(text = status, style = MaterialTheme.typography.bodyMedium)

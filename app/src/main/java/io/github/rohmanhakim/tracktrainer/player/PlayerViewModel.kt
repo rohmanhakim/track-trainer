@@ -11,9 +11,13 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.rohmanhakim.tracktrainer.cache.CacheBookkeeper
+import io.github.rohmanhakim.tracktrainer.cache.CacheKeyFactory
+import io.github.rohmanhakim.tracktrainer.data.local.SourceType
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackHealthChecker
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackRepository
 import javax.inject.Inject
@@ -25,6 +29,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import io.github.rohmanhakim.tracktrainer.data.local.Track
 
 /** What the player screen renders: one track's transport state. */
 data class PlayerUiState(
@@ -49,6 +54,8 @@ class PlayerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: TrackRepository,
     private val healthChecker: TrackHealthChecker,
+    private val cacheDataSourceFactory: CacheDataSource.Factory,
+    private val bookkeeper: CacheBookkeeper,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlayerUiState())
@@ -59,6 +66,8 @@ class PlayerViewModel @Inject constructor(
 
     /** Null until a track is open; guards the rotation re-entry of [openTrack]. */
     private var openedTrackId: Long? = null
+    /** Cache key of the currently open track (null for local `content://` playback). */
+    private var currentCacheKey: String? = null
     /** Session-level speed; reapplied to each fresh ExoPlayer in [startPlayer], preserved across tracks. */
     private var currentSpeed = 1f
     private var positionJob: Job? = null
@@ -85,7 +94,7 @@ class PlayerViewModel @Inject constructor(
                 fail("File missing — re-link it in the library")
                 return@launch
             }
-            startPlayer(trackId, track.sourceRef, track.title, track.durationMs)
+            startPlayer(track)
         }
     }
 
@@ -142,7 +151,7 @@ class PlayerViewModel @Inject constructor(
         releaseInternal()
     }
 
-    private fun startPlayer(trackId: Long, sourceRef: String, title: String, durationMs: Long) {
+    private fun startPlayer(track: Track) {
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -154,27 +163,73 @@ class PlayerViewModel @Inject constructor(
             .build()
         // Apply the session speed to the fresh player (default 1× if never changed).
         player.setPlaybackParameters(PlaybackParameters(currentSpeed))
+        // http(s) items are served through the disk cache (read-through: streams while
+        // writing). Local SAF references play untouched — P1 regression guard.
+        currentCacheKey = cacheKeyFor(track)
+        val mediaItem = MediaItem.Builder()
+            .setUri(track.sourceRef)
+            .apply { currentCacheKey?.let { setCustomCacheKey(it) } }
+            .build()
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _uiState.update { it.copy(isPlaying = isPlaying) }
             }
 
+            override fun onPlayerStateChanged(playWhenReady: Boolean, state: Int) {
+                if (state == Player.STATE_ENDED) {
+                    // Whole stream has flowed through the cache: offline replay is now
+                    // guaranteed (P2-3) and the dot can show in the library.
+                    val trackId = openedTrackId
+                    val cacheKey = currentCacheKey
+                    if (trackId != null && cacheKey != null) {
+                        viewModelScope.launch { bookkeeper.markPlayed(trackId, cacheKey) }
+                    }
+                }
+            }
+
             override fun onPlayerError(error: PlaybackException) {
-                Log.e(TAG, "Playback failed for $sourceRef", error)
+                Log.e(TAG, "Playback failed for ${track.sourceRef}", error)
                 fail("Can't play this file")
             }
         }
         player.addListener(listener)
-        player.setMediaItem(MediaItem.fromUri(sourceRef))
+        player.setMediaItem(mediaItem)
         player.prepare()
         player.playWhenReady = true
 
-        openedTrackId = trackId
+        openedTrackId = track.id
         playerListener = listener
         _player.value = player
         // Preserve session speed across track opens (P1-3e); only refresh loading/title/duration.
-        _uiState.update { it.copy(isLoading = false, title = title, durationMs = durationMs) }
+        _uiState.update {
+            it.copy(isLoading = false, title = track.title, durationMs = track.durationMs)
+        }
         startPositionPolling(player)
+    }
+
+    /**
+     * Stable cache key for [track], or null when the track must not be cached (local SAF
+     * references). YouTube keys are `videoId + itag` (never the watch URL — R6); direct URL
+     * keys are a hash of the normalized URL (R15).
+     */
+    private fun cacheKeyFor(track: Track): String? {
+        return if (track.sourceRef.startsWith("http://") || track.sourceRef.startsWith("https://")) {
+            when (track.sourceType) {
+                SourceType.YOUTUBE -> {
+                    val videoId = track.youtubeId
+                    if (videoId == null) {
+                        Log.w(TAG, "YouTube track ${track.id} has no youtubeId — caching disabled")
+                        null
+                    } else {
+                        CacheKeyFactory.youtubeKey(videoId, track.itag ?: "0")
+                    }
+                }
+                SourceType.DIRECT -> CacheKeyFactory.directKey(track.sourceRef)
+                SourceType.LOCAL -> null
+            }
+        } else {
+            null
+        }
     }
 
     /**
@@ -233,6 +288,7 @@ class PlayerViewModel @Inject constructor(
         positionJob = null
         _player.value?.let { player -> playerListener?.let(player::removeListener); player.release() }
         playerListener = null
+        currentCacheKey = null
         _player.value = null
     }
 
