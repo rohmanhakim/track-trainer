@@ -18,4 +18,10 @@ class TrackRepository @Inject constructor(
     suspend fun add(track: Track): Long = trackDao.insert(track)
 
     suspend fun update(track: Track) = trackDao.update(track)
+
+    /** Pins/unpins a track so the cache evictor never evicts its key (Phase 7 pin API). */
+    suspend fun pinTrack(id: Long, pinned: Boolean) =
+        trackDao.getById(id)?.let { track ->
+            trackDao.update(track.copy(pinned = pinned))
+        }
 }

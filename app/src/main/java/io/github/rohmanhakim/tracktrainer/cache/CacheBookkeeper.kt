@@ -33,6 +33,11 @@ class CacheBookkeeper @Inject constructor(
             val cachedBytes =
                 cache.getCachedSpans(cacheKey).firstOrNull { it.isCached && it.position == 0L }?.length
                     ?: 0L
+            if (cachedBytes == 0L) {
+                // Nothing actually reached SimpleCache — dot must stay off (offline=false
+                // is the honest state; re-extract on next open will try again).
+                return@withContext
+            }
             repository.update(
                 track.copy(
                     offline = true,

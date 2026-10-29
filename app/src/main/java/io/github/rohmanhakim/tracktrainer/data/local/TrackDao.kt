@@ -22,4 +22,8 @@ interface TrackDao {
 
     @Query("SELECT COUNT(*) FROM tracks")
     suspend fun count(): Int
+
+    /** Tracks whose cache keys must never be evicted (Phase 7 pin backing semantics). */
+    @Query("SELECT * FROM tracks WHERE pinned = 1")
+    fun observePinnedTracks(): Flow<List<Track>>
 }

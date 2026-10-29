@@ -74,7 +74,7 @@ takePersistableUriPermission   │                           │
 
 - **Stable cache keys:** YouTube → `videoId + itag`; Direct URL → `SHA-256(url)` normalized (strip volatile query params where safe). **Never the full URL** for YouTube (expires ~6h → default keys would miss on every replay).
 - **No download UI.** Offline state = subtle indicator only; optional hidden "keep offline" pin uses Media3 `DownloadService` in background.
-- Eviction: `SimpleCache` LRU. **No size cap initially** — owner decision: start unconstrained and add a cache-size setting when real usage shows a need (Phase 7+). Pinned tracks exempt from eviction.
+- Eviction: `SimpleCache` LRU. **No size cap in production initially** — owner decision: start unconstrained and add a cache-size setting when real usage shows a need (Phase 7+). Pinned tracks exempt from eviction. **T05 deviation:** debug builds run a hardcoded 50 MB cap (`DEBUG_CACHE_CAP` in `cache/CacheModule.kt`) so P2-5 eviction is exercisable on device; the toggle is a manual constant (AGP 9.3.3 doesn't generate `BuildConfig` in this project) and **must be flipped to `false` before cutting any release APK**. Replaced by the Phase 7 `cacheMaxBytes` setting when that lands.
 - **Local (reference in place, D11):** `content://` URI + `takePersistableUriPermission`, stored on the `Track` row. No copying — keeping the file available is the user's responsibility (01-product-overview non-goals). Health check on open: unreadable/revoked reference → track flagged *"file missing — re-link"* (re-pick the file), never a crash. Cloud-provider source (Drive etc.) → one-time offline warning. Note: persisted grants have a documented per-app cap (~128) — relevant only for huge local libraries.
 - **Format constraint:** progressive (muxed A/V) formats only, default 720p (tabs legible, halves storage). 1080p+ DASH requires muxing — V2.
 
@@ -162,6 +162,7 @@ Preset      { id, trackId, speed, transpose, bpm?, tapOffsetMs?,
               boostDb, ... }        // one per track (with defaults)
 Settings    { defaultQuality, alwaysPinOpened, ... }  // DataStore
             // cacheMaxBytes: intentionally absent — no cap for now; add when needed
+            // (debug builds ship a hardcoded 50 MB cap — see eviction note above)
 ```
 
 ## 5. Key decisions (ADR-style)

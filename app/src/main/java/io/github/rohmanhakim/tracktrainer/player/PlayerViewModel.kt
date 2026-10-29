@@ -13,6 +13,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.ExoPlayer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -221,6 +222,9 @@ class PlayerViewModel @Inject constructor(
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
         val player = ExoPlayer.Builder(context)
+            // http(s) items are served through the disk cache (read-through: streams while
+            // writing). Local SAF references play untouched — P1 regression guard.
+            .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
             // Take audio focus so a call or another app pauses us instead of two
             // sounds fighting; no MediaSession until Phase 7, this is the cheap half.
             .setAudioAttributes(audioAttributes, true)

@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -301,6 +303,38 @@ class SpikeActivity : ComponentActivity() {
                         },
                         enabled = url.isNotEmpty(),
                     ) { Text(text = "Insert direct track into library") }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    var pinId by remember { mutableStateOf("") }
+                    TextField(
+                        value = pinId,
+                        onValueChange = { pinId = it },
+                        label = { Text(text = "Track id to pin") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Button(
+                        onClick = {
+                            val id = pinId.toLongOrNull() ?: return@Button
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    try {
+                                        this@SpikeActivity.repository.pinTrack(id, pinned = true)
+                                        Log.d("T01SPIKE", "PINNED track id=$id")
+                                        _status.value = "Pinned track id=$id"
+                                    } catch (e: Exception) {
+                                        Log.e("T01SPIKE", "Pin failed for id=$id", e)
+                                        _status.value = "Pin failed: ${e.message}"
+                                    }
+                                }
+                            }
+                        },
+                    ) { Text(text = "Pin track") }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(text = status, style = MaterialTheme.typography.bodyMedium)

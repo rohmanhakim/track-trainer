@@ -30,6 +30,9 @@ class PinAwareLruEvictor(
     private val clock: () -> Long = { System.currentTimeMillis() },
 ) : CacheEvictor {
 
+    /** Actually removes the span from [Cache]. Wired to [SimpleCache.removeSpan] by [CacheModule]. */
+    var removeSpan: (CacheSpan) -> Unit = { }
+
     override fun requiresCacheSpanTouches(): Boolean = true
 
     override fun onCacheInitialized() {}
@@ -85,7 +88,9 @@ class PinAwareLruEvictor(
                 sizes.remove(victim)
                 touches.remove(victim)
                 current -= size
-                onEvict(CacheSpan(victim, 0, size, touched, File(victim)))
+                val span = CacheSpan(victim, 0, size, touched, File(victim))
+                onEvict(span)
+                removeSpan(span)
             }
         }
     }

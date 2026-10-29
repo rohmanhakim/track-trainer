@@ -17,6 +17,7 @@ import io.github.rohmanhakim.tracktrainer.data.local.Track
 import io.github.rohmanhakim.tracktrainer.data.prefs.AppPreferences
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackHealthChecker
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackRepository
+import io.github.rohmanhakim.tracktrainer.library.TrackNaming
 import io.github.rohmanhakim.tracktrainer.youtube.Extractor
 import io.github.rohmanhakim.tracktrainer.youtube.ExtractionException
 import javax.inject.Inject
@@ -162,7 +163,7 @@ class LibraryViewModel @Inject constructor(
                             Track(
                                 sourceType = SourceType.DIRECT,
                                 sourceRef = input,
-                                title = deriveTitle(input),
+                                title = TrackNaming.deriveSourceTitle(input),
                             )
                         )
                     }
@@ -178,16 +179,6 @@ class LibraryViewModel @Inject constructor(
             }
         }
     }
-
-    private fun deriveTitle(url: String): String =
-        try {
-            java.net.URI(url).path
-                ?.substringAfterLast("/")
-                ?.takeIf { it.isNotEmpty() }
-                ?: java.net.URI(url).host ?: url
-        } catch (_: Exception) {
-            url
-        }
 
     /**
      * Re-point an existing track at a fresh source (P1-1a re-link). Order matters:

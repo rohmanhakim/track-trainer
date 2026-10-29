@@ -22,9 +22,11 @@ speed control, A-B loop, animated count-in, tap-tempo metronome, volume boost.
 - **Phase 1 complete** (exited 2026-10-26): Compose + M3 foundation, local video playback,
   speed control 0.25×–2×, portrait study layout + graceful landscape fallback, all on-device
   verified (emulator API 37 + Redmi API 35). `docs/tasks/phase-1.md` — T01–T07 all `done`.
-- **Current execution checklist:** `docs/tasks/phase-2.md` — 6 session tasks (T01–T06).
-  Work through them in order; T01 (NewPipe spike, gate G1 → D2) is the first task. Update each
-  task's status + Session notes as you go.
+- **Phase 2 complete** (exited 2026-10-30): YouTube + direct URL + offline cache, all on-device
+  verified (Redmi API 35). `docs/tasks/phase-2.md` — T01–T06 all `done`.
+  - D2 validated: yt-dlp primary (`io.github.junkfood02.youtubedl-android:library:0.18.1`), gate G1 passed.
+  - P2-1…P2-8 all verified on device: paste link → play → offline replay, stable cache keys (`videoId` + `itag`), LRU eviction under 50 MB debug cap.
+- **Next:** `docs/03-roadmap.md` Phase 3 — A-B Loop + Presets. Groom `docs/tasks/phase-3.md` before starting.
 - Then follow `docs/03-roadmap.md`: one phase at a time, stories + acceptance
   criteria, Definition of Done applies (§10).
 

@@ -49,6 +49,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import io.github.rohmanhakim.tracktrainer.R
 import io.github.rohmanhakim.tracktrainer.data.local.Track
+import io.github.rohmanhakim.tracktrainer.library.TrackNaming
 
 private val VIDEO_MIME_TYPES = arrayOf("video/*")
 
@@ -124,7 +125,7 @@ fun LibraryScreen(
                     TrackRow(
                         track = track,
                         missing = track.id in uiState.missingIds,
-                        offline = track.offline,
+                        offline = track.offline && !track.needsRefresh,
                         onRelink = {
                             pendingRelinkId = track.id
                             pickLauncher.launch(VIDEO_MIME_TYPES)
@@ -223,7 +224,9 @@ private fun PasteDialog(
                         text = stringResource(R.string.resolving_link),
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    CircularProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(48.dp).align(Alignment.CenterHorizontally),
+                    )
                 } else {
                     OutlinedTextField(
                         value = value,
@@ -283,12 +286,13 @@ private fun TrackRow(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-                if (track.durationMs > 0L) {
-                    Text(
-                        text = formatDuration(track.durationMs),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
+                Text(
+                    text = TrackNaming.sourceLabel(track),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         },
         trailingContent = {
