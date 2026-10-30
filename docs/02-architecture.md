@@ -157,9 +157,12 @@ Track       { id, sourceType(LOCAL|YOUTUBE|DIRECT), sourceRef, title,
               // YOUTUBE: sourceRef = watch URL; needsRefresh = re-extract needed
               // DIRECT: needsRefresh = cached copy gone AND URL expired → prompt re-paste
 LoopPoint   { id, trackId, label, positionA, positionB }
-Preset      { id, trackId, speed, transpose, bpm?, tapOffsetMs?,
-              countInClicks, countInBars, clickSound, clickVolume,
-              boostDb, ... }        // one per track (with defaults)
+Preset      { id, trackId, activeLoopPointId?, speed, transpose,
+              bpm, tapOffsetMs, countInClicks, countInBars,
+              clickSound, clickVolume, boostDb }  // one per track with
+                                                  // defaults; preset wins on
+                                                  // open, session-level speed
+                                                  // is fallback/default (P3)
 Settings    { defaultQuality, alwaysPinOpened, ... }  // DataStore
             // cacheMaxBytes: intentionally absent — no cap for now; add when needed
             // (debug builds ship a hardcoded 50 MB cap — see eviction note above)

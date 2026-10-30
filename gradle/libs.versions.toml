@@ -14,6 +14,7 @@ datastore = "1.2.1"
 coroutines = "1.11.0"
 lifecycle = "2.11.0"
 media3 = "1.11.1"
+robolectric = "4.17"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -45,6 +46,10 @@ hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", v
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+androidx-room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
+
+# Robolectric for JVM unit tests with Android types (T01 DAO tests).
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 
 # Coil 3 image loading for YouTube thumbnails (T04, decision 2A).
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version = "3.6.3" }

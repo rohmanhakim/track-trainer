@@ -47,6 +47,12 @@ android {
         // See app/lint.xml — project-level opt-in for selected Media3 @UnstableApi usage.
         lintConfig = file("lint.xml")
     }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 // Schemas exported to app/schemas/ and committed (owner decision — see T02 session notes).
@@ -103,6 +109,8 @@ dependencies {
     implementation(libs.androidx.media3.common)
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.room.testing)
 }

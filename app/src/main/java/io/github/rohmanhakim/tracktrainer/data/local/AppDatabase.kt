@@ -6,10 +6,12 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Track::class], version = 3, exportSchema = true)
+@Database(entities = [Track::class, LoopPoint::class, Preset::class], version = 4, exportSchema = true)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao
+    abstract fun loopPointDao(): LoopPointDao
+    abstract fun presetDao(): PresetDao
 
     companion object {
         const val NAME = "track-trainer.db"
@@ -25,6 +27,44 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE tracks ADD COLUMN streamUrl TEXT")
+            }
+        }
+
+        /** Non-destructive: adds the `loop_points` and `presets` tables (Phase 3 T01). */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS loop_points (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        trackId INTEGER NOT NULL,
+                        label TEXT NOT NULL,
+                        positionA INTEGER NOT NULL,
+                        positionB INTEGER NOT NULL,
+                        FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_loop_points_trackId ON loop_points (trackId)")
+
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS presets (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        trackId INTEGER NOT NULL,
+                        activeLoopPointId INTEGER,
+                        speed REAL NOT NULL DEFAULT 1.0,
+                        transpose INTEGER NOT NULL DEFAULT 0,
+                        bpm REAL NOT NULL DEFAULT 0.0,
+                        tapOffsetMs INTEGER NOT NULL DEFAULT 0,
+                        countInClicks INTEGER NOT NULL DEFAULT 4,
+                        countInBars INTEGER NOT NULL DEFAULT 0,
+                        clickSound TEXT NOT NULL DEFAULT 'CLICK',
+                        clickVolume REAL NOT NULL DEFAULT 1.0,
+                        boostDb REAL NOT NULL DEFAULT 0.0,
+                        FOREIGN KEY(trackId) REFERENCES tracks(id) ON DELETE CASCADE,
+                        FOREIGN KEY(activeLoopPointId) REFERENCES loop_points(id) ON DELETE SET NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_presets_trackId ON presets (trackId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_presets_activeLoopPointId ON presets (activeLoopPointId)")
             }
         }
     }

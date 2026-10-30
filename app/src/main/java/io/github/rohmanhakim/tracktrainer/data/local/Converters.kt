@@ -8,4 +8,10 @@ class Converters {
 
     @TypeConverter
     fun stringToSourceType(value: String): SourceType = SourceType.valueOf(value)
+
+    @TypeConverter
+    fun clickSoundToString(value: ClickSound): String = value.name
+
+    @TypeConverter
+    fun stringToClickSound(value: String): ClickSound = ClickSound.valueOf(value)
 }

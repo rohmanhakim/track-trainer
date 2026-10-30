@@ -95,7 +95,7 @@ execution status; this section remains the scope authority.
 - A/B markers on the seek bar; set/clear/move; loop toggle.
 - Position-polling loop controller (30–50 ms) with `CLOSEST_SYNC` seek to A.
 - Seam fade (~5 ms) to kill loop-boundary pops.
-- Multiple named loop points per track + repeat counts.
+- Multiple named loop points per track; **loop-until-off only** (no repeat counts).
 - Per-track `Preset` in Room: speed, loop points auto-restored on open.
 - Frame step ±1 (F10) — small, rides along with seek work.
 
