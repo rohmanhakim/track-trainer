@@ -10,6 +10,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.SimpleCache
@@ -23,6 +24,8 @@ import io.github.rohmanhakim.tracktrainer.data.local.SourceType
 import io.github.rohmanhakim.tracktrainer.data.local.Track
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackHealthChecker
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackRepository
+import io.github.rohmanhakim.tracktrainer.loop.ExoLoopPlayer
+import io.github.rohmanhakim.tracktrainer.loop.LoopController
 import io.github.rohmanhakim.tracktrainer.youtube.Extractor
 import io.github.rohmanhakim.tracktrainer.youtube.ExtractionException
 import javax.inject.Inject
@@ -105,6 +108,21 @@ class PlayerViewModel @Inject constructor(
     private var reextractAttempted = false
     private var positionJob: Job? = null
     private var playerListener: Player.Listener? = null
+    /** Loop engine; outlives a single ExoPlayer so A/B survive player rebuilds (rotation). */
+    private val loopController = LoopController(viewModelScope)
+
+    init {
+        // Log every loop seam so P3-2 deviation can be measured on-device via logcat.
+        viewModelScope.launch {
+            loopController.seamEvents.collect { event ->
+                Log.d(
+                    TAG,
+                    "loop seam: boundary=${event.boundaryPositionMs} ms " +
+                        "overrun=${event.overrunMs} ms → seekTo A=${event.seekToMs} ms",
+                )
+            }
+        }
+    }
 
     /**
      * Opens a track and starts playback. Idempotent for the current track: the screen's
@@ -225,12 +243,28 @@ class PlayerViewModel @Inject constructor(
             // http(s) items are served through the disk cache (read-through: streams while
             // writing). Local SAF references play untouched — P1 regression guard.
             .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
+            // Seek-to-A (loop seam) and bar seeks land on sync frames (P3-2).
+            .setSeekParameters(SeekParameters.CLOSEST_SYNC)
             // Take audio focus so a call or another app pauses us instead of two
             // sounds fighting; no MediaSession until Phase 7, this is the cheap half.
             .setAudioAttributes(audioAttributes, true)
             .build()
         // Apply the session speed to the fresh player (default 1× if never changed).
         player.setPlaybackParameters(PlaybackParameters(currentSpeed))
+        // Bind the loop engine to this player instance; A/B state lives on the
+        // controller and survives player rebuilds (rotation).
+        loopController.attach(ExoLoopPlayer(player))
+        // DEBUG ONLY — seeds A/B on a designated track so T02 can be verified on-device
+        // without the loop UI (T03). No-op unless DEBUG_LOOP_SEED is flipped on.
+        if (DEBUG_LOOP_SEED && track.id == DEBUG_LOOP_SEED_TRACK_ID) {
+            loopController.setA(DEBUG_LOOP_SEED_A_MS)
+            loopController.setB(DEBUG_LOOP_SEED_B_MS)
+            loopController.setLoopEnabled(true)
+            Log.d(
+                TAG,
+                "debug loop seed: A=${DEBUG_LOOP_SEED_A_MS} B=${DEBUG_LOOP_SEED_B_MS} trackId=${track.id}",
+            )
+        }
         // http(s) items are served through the disk cache (read-through: streams while
         // writing). Local SAF references play untouched — P1 regression guard.
         currentCacheKey = cacheKeyFor(track)
@@ -412,6 +446,7 @@ class PlayerViewModel @Inject constructor(
     private fun releaseInternal() {
         positionJob?.cancel()
         positionJob = null
+        loopController.detach()
         _player.value?.let { player -> playerListener?.let(player::removeListener); player.release() }
         playerListener = null
         currentCacheKey = null
@@ -422,5 +457,14 @@ class PlayerViewModel @Inject constructor(
         private const val TAG = "TrackTrainer"
         private const val POSITION_POLL_MS = 250L
         private const val DECODER_LOG_TICKS = 20 // 20 × 250 ms ≈ 5 s between decoder logs
+
+        // DEBUG ONLY — seeds A/B on a specific track so T02 can be verified on-device
+        // without the loop UI (T03). Owner sets DEBUG_LOOP_SEED_TRACK_ID to their test
+        // track id. Flip DEBUG_LOOP_SEED to false before any release APK (same
+        // release-gate discipline as DEBUG_CACHE_CAP in cache/CacheModule.kt).
+        private const val DEBUG_LOOP_SEED = false
+        private const val DEBUG_LOOP_SEED_TRACK_ID: Long = -1
+        private const val DEBUG_LOOP_SEED_A_MS = 10_000L
+        private const val DEBUG_LOOP_SEED_B_MS = 20_000L
     }
 }

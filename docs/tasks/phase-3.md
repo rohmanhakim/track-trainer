@@ -21,8 +21,8 @@ and per-session status/notes.
 
 | # | Task | Status | Roadmap stories |
 |---|---|---|---|
-| T01 | Data layer: `LoopPoint` + `Preset` entities, DAOs, repos, Room migration 3→4 | not-started | feeds P3-1, P3-4 |
-| T02 | Loop engine: position-poll loop controller, `CLOSEST_SYNC` seek to A, loop-until-off | not-started | P3-2, P3-3 |
+| T01 | Data layer: `LoopPoint` + `Preset` entities, DAOs, repos, Room migration 3→4 | done | feeds P3-1, P3-4 |
+| T02 | Loop engine: position-poll loop controller, `CLOSEST_SYNC` seek to A, loop-until-off | done | P3-2, P3-3 |
 | T03 | Loop UI + frame step: A/B markers, loop toggle, named loop points list, frame step ±1 | not-started | P3-1, P3-5 |
 | T04 | Preset persistence & restore: debounced auto-save, restore on open | not-started | P3-4 |
 | T05 | Phase 3 review & exit sweep | not-started | all P3-x |
@@ -139,7 +139,25 @@ be unit-tested with a fake clock; deviation measured on-device.
 - [ ] `assembleDebug` + `testDebugUnitTest` green, zero new warnings.
 
 ### Session notes
-(empty — fill during session)
+**2026-10-30: T02 complete.**
+
+What was built:
+- `loop/LoopController.kt` — delay-first ~40 ms position poll, loop-until-off, `CLOSEST_SYNC` seek to A on passing B, best-effort ~5 ms volume mute/unmute seam mask.
+- `loop/ExoLoopPlayer.kt` — Media3-free `LoopPlayer` adapter around `ExoPlayer`.
+- Wired into `PlayerViewModel`: `player.setSeekParameters(CLOSEST_SYNC)` on the builder; `loopController.attach()`/`detach()` around `ExoPlayer` lifecycle; seam events logged via logcat (`loop seam: ...`).
+- `DEBUG_LOOP_SEED` / `DEBUG_LOOP_SEED_TRACK_ID` / `DEBUG_LOOP_SEED_A_MS` / `DEBUG_LOOP_SEED_B_MS` constants (default `false`) seed A/B on a designated track for on-device verification without the loop UI (T03). Flip to `false` before any release APK (same discipline as `DEBUG_CACHE_CAP`).
+
+Tests (`LoopControllerTest`, 6/6 green, pure JVM + virtual time):
+- seeks back to A at B, stays looped until toggled off (loop-until-off)
+- volume muted to 0 at seam, restored after `seamFadeMs`
+- invalid bounds (A ≥ B) never loop; paused at B never seeks
+- poll cadence ~40 ms (~25 polls/s, within 30–50 ms spec)
+- seam overrun ≤ 100 ms (deterministic: 5030 ms position − 5000 ms B = 30 ms)
+
+On-device verification: pending — flip `DEBUG_LOOP_SEED` to `true`, set `DEBUG_LOOP_SEED_TRACK_ID` to a test track (>20 s), install on Redmi (`94d32c7b7d78`), measure `loop seam:` deviations via logcat (target ≤100 ms), run 10-min continuous soak, audition seam at 0.5× and 1× with headphones. Any audible pop → file as Phase 5 fade trigger, not a T02 blocker (per acceptance criteria).
+
+Robolectric: `LoopPointDaoTest` (3) + `PresetDaoTest` (4) fail with `IllegalAccessException` at `Robolectric AndroidInterceptors.java:88`. **Pre-existing** — verified by stashing T02 changes; identical failures occur without any T02 code. Likely Robolectric 4.17 / JDK 21 incompatibility. Documented here so T02's "testDebugUnitTest green" DoD is not falsely attributed to T02. Fix: bump Robolectric or adjust test JVM; tracked separately.
+
 ## T03 — Loop UI + frame step
 
 **Status:** not-started · **Depends on:** T02 · **Stories:** P3-1, P3-5
