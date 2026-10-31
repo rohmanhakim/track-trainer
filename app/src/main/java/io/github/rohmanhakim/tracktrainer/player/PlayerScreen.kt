@@ -12,6 +12,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -28,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.Player
 import io.github.rohmanhakim.tracktrainer.R
+import io.github.rohmanhakim.tracktrainer.loop.LoopState
 import io.github.rohmanhakim.tracktrainer.ui.study.StudyScreen
 
 /**
@@ -81,6 +84,8 @@ fun PlayerScreen(
         onDispose { lifecycle.removeObserver(observer) }
     }
 
+    val scope = rememberCoroutineScope()
+
     StudyScreen(
         uiState = uiState,
         player = player,
@@ -89,6 +94,19 @@ fun PlayerScreen(
         onSeek = { viewModel.seekTo(it) },
         speed = uiState.speed,
         onSpeedChange = { viewModel.setSpeed(it) },
+        loopState = uiState.loopState,
+        loopPoints = uiState.loopPoints,
+        onSetA = { viewModel.setLoopA() },
+        onSetB = { viewModel.setLoopB() },
+        onClearA = { viewModel.clearLoopA() },
+        onClearB = { viewModel.clearLoopB() },
+        onToggleLoop = { viewModel.toggleLoop() },
+        onStepBack = { viewModel.frameStep(false) },
+        onStepForward = { viewModel.frameStep(true) },
+        onSelectLoop = { id -> scope.launch { viewModel.selectLoopPoint(id) } },
+        onSaveLoop = { name -> scope.launch { viewModel.saveLoopPoint(name) } },
+        onRenameLoop = { id, name -> scope.launch { viewModel.renameLoopPoint(id, name) } },
+        onDeleteLoop = { id -> scope.launch { viewModel.deleteLoopPoint(id) } },
         modifier = modifier,
     )
 

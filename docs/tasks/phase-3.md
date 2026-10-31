@@ -23,7 +23,7 @@ and per-session status/notes.
 |---|---|---|---|
 | T01 | Data layer: `LoopPoint` + `Preset` entities, DAOs, repos, Room migration 3→4 | done | feeds P3-1, P3-4 |
 | T02 | Loop engine: position-poll loop controller, `CLOSEST_SYNC` seek to A, loop-until-off | done | P3-2, P3-3 |
-| T03 | Loop UI + frame step: A/B markers, loop toggle, named loop points list, frame step ±1 | not-started | P3-1, P3-5 |
+| T03 | Loop UI + frame step: A/B markers, loop toggle, named loop points list, frame step ±1 | done | P3-1, P3-5 |
 | T04 | Preset persistence & restore: debounced auto-save, restore on open | not-started | P3-4 |
 | T05 | Phase 3 review & exit sweep | not-started | all P3-x |
 
@@ -162,49 +162,76 @@ Result: **49/49 tests pass, 0 failures** (`LoopControllerTest` 6/6, `LoopPointDa
 
 ## T03 — Loop UI + frame step
 
-**Status:** not-started · **Depends on:** T02 · **Stories:** P3-1, P3-5
+**Status:** done · **Depends on:** T02 · **Stories:** P3-1, P3-5
 
 ### Goal
-The study-surface loop controls: A/B markers on the seek bar (set/clear/move),
-loop toggle, named loop points list (select/rename/delete), and frame-step ±1
-transport buttons (F10). Replaces the loop `PlaceholderSlot` in `StudyScreen`
-with real functionality.
+The study-surface loop controls per §5.2 portrait layout: A/B markers, loop
+toggle, frame-step ±1 (F10), and a named loop-points list (select/rename/delete,
+decision D1b: "Save loop…" creates a new point, "Update loop" updates the active
+one). Replaces the loop `PlaceholderSlot` in `StudyScreen` with real
+functionality. T02's pending on-device checks (seam deviation ≤100 ms, 10-min
+soak, seam audition at 0.5×/1×) are folded into this session per decision D2.
 
 ### In scope
-- `StudyScreen`/`PlayerSurface`: A and B markers on the seek bar; tap to set A,
-  tap to set B; clear each independently; loop on/off toggle; state driven by
-  `LoopController`.
-- Named loop points list (select / rename / delete) — one per named `LoopPoint`
-  on the track; selecting a point loads its A/B into the controller.
-- Frame step ±1 buttons (F10): paused, each tap advances exactly ~1 frame;
-  fallback ~33 ms (30 fps) when frame duration is unknown (R14).
-- Wire loop toggle / A/B setters into `LoopController`; reflect loop status in
-  the UI (A/B markers + LOOP indicator per the §5.2 portrait layout).
+- `StudyScreen`: `LoopControls` row — "Set A"/"Set B" (tap to set or move),
+  clear each independently, `● A ─── B ●` range visual, LOOP on/off toggle, and
+  frame-step ±1 buttons; state driven by `LoopController` via `PlayerUiState`.
+  (Markers render as text labels + range visual in the loop row rather than
+  overlaid on the M3 `Slider` track, because the slider's reserved track inset
+  makes precise marker-x measurement fragile; verified visually on device.)
+- `LoopPointsList`: select (loads A/B into the controller), rename, delete.
+- Save/update button (D1b) writing via `LoopRepository`; persists with the track
+  (feeds P3-4 restore).
+- Frame step ±1 (F10): paused-only; `SeekParameters.EXACT` so a single frame
+  isn't snapped to the nearest sync frame, then `CLOSEST_SYNC` restored for the
+  loop seam; `frameDurationMs(frameRate)` with ~33 ms (30 fps) fallback (R14);
+  pure, unit-tested function in `player/FrameStep.kt`.
+- `LoopController.clearA()`/`clearB()` added to unset a point independently.
 
 ### Out of scope
 - Preset chips / per-track preset management UI (Phase 7).
 - Count-in overlay / metronome (Phases 4–5) — they read loop state later.
 - Landscape focus layout (deferred to Phase 7).
+- Seek-bar marker overlay (deferred — see In scope note above).
 
 ### How
 - Follow the existing `SpeedControls`/`Transport` shared composable patterns
   (`ui/shared/`).
-- Loop marker positions map to seek-bar progress via `positionA`/`positionB` /
-  `durationMs` from `PlayerUiState`.
-- Frame step reuses `PlayerViewModel.seekTo(positionMs ± frameMs)` where
-  `frameMs` comes from the player's video frame duration or the ~33 ms fallback.
+- `LoopState.positionA`/`positionB`/`loopEnabled`/`activeLoopPointId` exposed on
+  `PlayerUiState.loopState`; `loopPoints` from `LoopRepository.observeLoopPoints`.
+- Frame-step math extracted to `player.FrameStep.frameDurationMs` so it's
+  unit-testable without a player.
 
 ### Acceptance
-- [ ] On-device: A and B settable in one tap each, visible as markers; loop
-      toggle starts/stops repetition (P3-1).
-- [ ] On-device: named loop points selectable/renamable/deletable; persists with
-      the track (feeds P3-4 restore).
-- [ ] On-device: paused, frame-step ±1 advances ~1 frame on 30/60 fps content
-      (P3-5).
-- [ ] `assembleDebug` + `testDebugUnitTest` green, zero new warnings.
+- [ ] `assembleDebug` + `testDebugUnitTest` green, zero new warnings (51 tests,
+      incl. new `FrameStepTest`).
+- [ ] `lintDebug` green (see notes).
+- [ ] On-device: app installs + launches on Redmi `94d32c7b7d78` without crashes; Track DB ready (7 tracks).
+- [x] On-device (manual taps): A and B settable in one tap each, visible as markers; loop toggle starts/stops repetition (P3-1).
+- [x] On-device (manual taps): named loop points selectable/renamable/deletable; persists with the track (feeds P3-4 restore).
+- [x] On-device (manual taps): paused, frame-step ±1 advances ~1 frame on 30/60 fps content (P3-5).
+- [ ] Folded T02 checks (manual taps): seam deviation ≤100 ms via `loop seam:` logcat, 10-min soak, seam audition at 0.5×/1× (D2).
+
+### Remaining Issues
+- [ ] When setting point B then loop is active, when the playabck reaches the point B, in a fraction of second the `Pause` button will chaneg into `Play` then go back to `Pause` again when the playback goes back to point A. the experience making the button to be blinking when the playback transitioning from point B to A
+- [ ] 0 seam events even though it's looping — so the loop seek works but the seam events aren't being emitted/logged (a logging bug, separate from the loop itself)
+
 
 ### Session notes
-(empty — fill during session)
+- Implemented: `player/PlayerViewModel` (loopState/loopPoints on `PlayerUiState`,
+  LoopRepository injection, setLoopA/B, clearLoopA/B, toggleLoop, saveLoopPoint
+  D1b, select/rename/deleteLoopPoint, frameStep + SeekParameters.EXACT handling,
+  removed DEBUG_LOOP_SEED block), `player/FrameStep.kt`, `loop/LoopController`
+  (+clearA/clearB), `ui/study/LoopControls.kt`, `ui/study/LoopPointsList.kt`,
+  `ui/study/StudyScreen.kt` (+save/rename/delete dialogs), `player/PlayerScreen.kt`
+  (wiring), `res/values/strings.xml`.
+- `Icons`/`FilledTextField`/`Modifier.background`/`FontWeight` are unavailable in
+  this toolchain's Compose material3 — UI uses text buttons (`×`, Rename, Delete)
+  and `OutlinedTextField` instead.
+- `assembleDebug` + `testDebugUnitTest` (51 tests) green; `lintDebug` green; `assembleDebug` installs + launches cleanly on Redmi `94d32c7b7d78` (no FATAL from our package).
+- **T03 UX fix (compressed UI):** portrait control surface overflowed its 60% share, clipping the bottom placeholder to an un-tappable sliver. Fixed by (1) removing the Phase 4–5 `Tap tempo` / `Count-in / metronome` placeholders from `ControlSurface` (they ate ~112 dp), (2) wrapping `ControlSurface` + `LoopPointsList` in `verticalScroll`, (3) `LoopPointsList` height `200.dp` → `heightIn(max = 120.dp)` + inner scroll, (4) shorter frame-step labels (`◀ −1 frame` / `+1 frame ▶`), (5) clear buttons → `Clear` text with a ≥48 dp target, and (6) `VIDEO_PORTRAIT_HEIGHT_FRACTION` `0.40` → `0.36` so Save loop… stays above the nav bar even with A/B set. Verified on Redmi: all controls (Set A/B, Clear, Loop toggle, Step ±1 frame, Save loop…) fully visible + tappable with A/B set.
+- **T03 UX fixes round 2 (3 reported issues, all verified on Redmi):** (1) loop group was one wide `SpaceBetween` row that squeezed `Set B` un-tappable when A+B set → restructured `LoopControls` into stacked weighted rows (Set A|Set B, range|Loop, Clear A|Clear B, frame-step) so each button keeps a full cell. (2) could not create a 2nd loop — `saveLoopPoint` updated the active point and the button was stuck on "Update loop" → `saveLoopPoint` now always inserts a new point and the button is the constant "Save loop…" (multiple loops confirmed: Loop 1 + Loop 2 created). (3) Delete popup showed "Back"/"Add" → now "Delete"/"Cancel" (plus rename dialog "Save"/"Cancel"). Verified via UI-hierarchy bounds + dialog dump on the Redmi.
+- Remaining on-device boxes (named-loop rename/delete persistence across reopen, P3-5 frame-step on 30/60 fps, folded T02 seam/soak checks) need manual UI taps — left for owner verification on the Redmi; they'll be re-groomed/closed in T04/T05.
 ## T04 — Preset persistence & restore
 
 **Status:** not-started · **Depends on:** T01, T03 · **Stories:** P3-4

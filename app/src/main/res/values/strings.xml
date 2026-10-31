@@ -36,4 +36,17 @@
     <string name="player_error_back">Back</string>
     <string name="button_add">Add</string>
     <string name="label_url">URL</string>
+
+    <!-- T03 loop (P3-1, P3-5, F10) -->
+    <string name="loop_set_a">Set A</string>
+    <string name="loop_set_b">Set B</string>
+    <string name="loop_loop">Loop</string>
+    <string name="loop_save">Save loop…</string>
+    <string name="loop_label_hint">Loop 1</string>
+    <string name="loop_rename">Rename</string>
+    <string name="loop_delete">Delete</string>
+    <string name="action_save">Save</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="frame_step_back">◀ −1 frame</string>
+    <string name="frame_step_fwd">+1 frame ▶</string>
 </resources>

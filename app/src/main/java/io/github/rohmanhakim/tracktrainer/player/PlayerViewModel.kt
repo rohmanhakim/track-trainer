@@ -20,12 +20,15 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.rohmanhakim.tracktrainer.cache.CacheBookkeeper
 import io.github.rohmanhakim.tracktrainer.cache.CacheKeyFactory
+import io.github.rohmanhakim.tracktrainer.data.local.LoopPoint
 import io.github.rohmanhakim.tracktrainer.data.local.SourceType
 import io.github.rohmanhakim.tracktrainer.data.local.Track
+import io.github.rohmanhakim.tracktrainer.data.repo.LoopRepository
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackHealthChecker
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackRepository
 import io.github.rohmanhakim.tracktrainer.loop.ExoLoopPlayer
 import io.github.rohmanhakim.tracktrainer.loop.LoopController
+import io.github.rohmanhakim.tracktrainer.loop.LoopState
 import io.github.rohmanhakim.tracktrainer.youtube.Extractor
 import io.github.rohmanhakim.tracktrainer.youtube.ExtractionException
 import javax.inject.Inject
@@ -49,6 +52,10 @@ data class PlayerUiState(
     val durationMs: Long = 0L,
     /** Current playback speed (session-level; 0.25×–2×). */
     val speed: Float = 1f,
+    /** Current A-B loop state, exposed by [loopController]. */
+    val loopState: LoopState = LoopState(),
+    /** Saved loop points for the open track. */
+    val loopPoints: List<LoopPoint> = emptyList(),
     /** Non-null = playback can't run (dead source, decode failure) — surfaced, never a crash. */
     val error: PlayerError? = null,
 )
@@ -86,6 +93,7 @@ class PlayerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: TrackRepository,
     private val healthChecker: TrackHealthChecker,
+    private val loopRepository: LoopRepository,
     private val cacheDataSourceFactory: CacheDataSource.Factory,
     private val bookkeeper: CacheBookkeeper,
     private val cache: SimpleCache,
@@ -107,6 +115,8 @@ class PlayerViewModel @Inject constructor(
     /** One re-extraction attempt per open (prevents loops on YOUTUBE playback failure). */
     private var reextractAttempted = false
     private var positionJob: Job? = null
+    /** Observes the open track's saved loop points; cancelled on each [openTrack]. */
+    private var loopPointsJob: Job? = null
     private var playerListener: Player.Listener? = null
     /** Loop engine; outlives a single ExoPlayer so A/B survive player rebuilds (rotation). */
     private val loopController = LoopController(viewModelScope)
@@ -122,6 +132,12 @@ class PlayerViewModel @Inject constructor(
                 )
             }
         }
+        // Reflect loop controller state (A/B, loop on/off, active point) in the UI.
+        viewModelScope.launch {
+            loopController.state.collect { state ->
+                _uiState.update { it.copy(loopState = state) }
+            }
+        }
     }
 
     /**
@@ -131,14 +147,21 @@ class PlayerViewModel @Inject constructor(
     fun openTrack(trackId: Long) {
         if (trackId == openedTrackId && _player.value != null) return
         reextractAttempted = false
+        loopPointsJob?.cancel()
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, title = it.title) }
+            _uiState.update { it.copy(isLoading = true, title = it.title, loopPoints = emptyList()) }
             val track = repository.getById(trackId)
             if (track == null) {
                 fail(PlaybackFailed)
                 return@launch
             }
             _uiState.update { it.copy(title = track.title) }
+            // Observe this track's saved loop points so the UI can list/restore them (P3-1, P3-4).
+            loopPointsJob = viewModelScope.launch {
+                loopRepository.observeLoopPoints(track.id).collect { points ->
+                    _uiState.update { it.copy(loopPoints = points) }
+                }
+            }
             // Health check on open (T04's How): this is the first code that really
             // re-reads the URI — a dead grant/file must surface here as an error,
             // never as a SecurityException inside ExoPlayer.
@@ -218,6 +241,83 @@ class PlayerViewModel @Inject constructor(
         player.setPlaybackParameters(PlaybackParameters(clamped))
     }
 
+    /** Sets loop point A to the current playhead position (tap to set / move). */
+    fun setLoopA() {
+        val player = _player.value ?: return
+        loopController.setA(player.currentPosition)
+    }
+
+    /** Sets loop point B to the current playhead position (tap to set / move). */
+    fun setLoopB() {
+        val player = _player.value ?: return
+        loopController.setB(player.currentPosition)
+    }
+
+    fun clearLoopA() = loopController.clearA()
+    fun clearLoopB() = loopController.clearB()
+
+    /** Toggles loop repetition on/off (loop-until-off). */
+    fun toggleLoop() {
+        val s = loopController.state.value
+        loopController.setLoopEnabled(!s.loopEnabled)
+    }
+
+    /** Saves the current A/B as a new named loop point (always creates; never overwrites). */
+    suspend fun saveLoopPoint(label: String) {
+        val s = loopController.state.value
+        if (s.positionA < 0L || s.positionB <= s.positionA) return
+        val trackId = openedTrackId ?: return
+        val point = LoopPoint(trackId = trackId, label = label, positionA = s.positionA, positionB = s.positionB)
+        val id = loopRepository.add(point)
+        loopController.setActiveLoopPoint(id)
+        loopController.setLoopEnabled(true)
+    }
+
+    /** Loads a saved loop point's A/B into the controller and marks it active. */
+    suspend fun selectLoopPoint(id: Long) {
+        val point = loopRepository.getById(id) ?: return
+        loopController.setA(point.positionA)
+        loopController.setB(point.positionB)
+        loopController.setActiveLoopPoint(id)
+        loopController.setLoopEnabled(true)
+    }
+
+    suspend fun renameLoopPoint(id: Long, label: String) {
+        val point = loopRepository.getById(id) ?: return
+        loopRepository.update(point.copy(label = label))
+    }
+
+    suspend fun deleteLoopPoint(id: Long) {
+        val point = loopRepository.getById(id) ?: return
+        val s = loopController.state.value
+        if (s.activeLoopPointId == id) {
+            loopController.setActiveLoopPoint(null)
+            loopController.setLoopEnabled(false)
+        }
+        loopRepository.remove(point)
+    }
+
+    /**
+     * Steps ±1 frame while paused (P3-5, F10). Uses `SeekParameters.EXACT` so a single
+     * frame isn't snapped to the nearest sync frame, then restores `CLOSEST_SYNC` used by
+     * the loop seam seeks. Falls back to ~33 ms (30 fps) when frame rate is unknown (R14).
+     */
+    fun frameStep(forward: Boolean) {
+        val player = _player.value ?: return
+        if (player.isPlaying) return
+        val durationMs = _uiState.value.durationMs
+        val current = player.currentPosition
+        val frameRate = player.videoFormat?.frameRate ?: 0f
+        val frameMs = frameDurationMs(frameRate)
+        var target = if (forward) current + frameMs else current - frameMs
+        target = if (durationMs > 0L) target.coerceIn(0L, durationMs) else target.coerceAtLeast(0L)
+        player.setSeekParameters(SeekParameters.EXACT)
+        player.seekTo(target)
+        player.setSeekParameters(SeekParameters.CLOSEST_SYNC)
+        _uiState.update { it.copy(positionMs = target) }
+        Log.d(TAG, "frame step: forward=$forward from=$current to=$target frameMs=$frameMs")
+    }
+
     /** Pause without tearing down — used when the app leaves the foreground. */
     fun pause() {
         _player.value?.pause()
@@ -254,17 +354,6 @@ class PlayerViewModel @Inject constructor(
         // Bind the loop engine to this player instance; A/B state lives on the
         // controller and survives player rebuilds (rotation).
         loopController.attach(ExoLoopPlayer(player))
-        // DEBUG ONLY — seeds A/B on a designated track so T02 can be verified on-device
-        // without the loop UI (T03). No-op unless DEBUG_LOOP_SEED is flipped on.
-        if (DEBUG_LOOP_SEED && track.id == DEBUG_LOOP_SEED_TRACK_ID) {
-            loopController.setA(DEBUG_LOOP_SEED_A_MS)
-            loopController.setB(DEBUG_LOOP_SEED_B_MS)
-            loopController.setLoopEnabled(true)
-            Log.d(
-                TAG,
-                "debug loop seed: A=${DEBUG_LOOP_SEED_A_MS} B=${DEBUG_LOOP_SEED_B_MS} trackId=${track.id}",
-            )
-        }
         // http(s) items are served through the disk cache (read-through: streams while
         // writing). Local SAF references play untouched — P1 regression guard.
         currentCacheKey = cacheKeyFor(track)
@@ -458,13 +547,5 @@ class PlayerViewModel @Inject constructor(
         private const val POSITION_POLL_MS = 250L
         private const val DECODER_LOG_TICKS = 20 // 20 × 250 ms ≈ 5 s between decoder logs
 
-        // DEBUG ONLY — seeds A/B on a specific track so T02 can be verified on-device
-        // without the loop UI (T03). Owner sets DEBUG_LOOP_SEED_TRACK_ID to their test
-        // track id. Flip DEBUG_LOOP_SEED to false before any release APK (same
-        // release-gate discipline as DEBUG_CACHE_CAP in cache/CacheModule.kt).
-        private const val DEBUG_LOOP_SEED = false
-        private const val DEBUG_LOOP_SEED_TRACK_ID: Long = -1
-        private const val DEBUG_LOOP_SEED_A_MS = 10_000L
-        private const val DEBUG_LOOP_SEED_B_MS = 20_000L
     }
 }

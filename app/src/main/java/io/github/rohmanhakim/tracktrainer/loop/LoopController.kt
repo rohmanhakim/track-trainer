@@ -92,6 +92,10 @@ class LoopController(
 
     fun setA(positionMs: Long) = _state.update { it.copy(positionA = positionMs.coerceAtLeast(0)) }
     fun setB(positionMs: Long) = _state.update { it.copy(positionB = positionMs.coerceAtLeast(0)) }
+    /** Unsets loop point A (no-op when already unset). */
+    fun clearA() = _state.update { it.copy(positionA = -1L) }
+    /** Unsets loop point B (no-op when already unset). */
+    fun clearB() = _state.update { it.copy(positionB = -1L) }
     fun setActiveLoopPoint(id: Long?) = _state.update { it.copy(activeLoopPointId = id) }
 
     fun setLoopEnabled(enabled: Boolean) {
