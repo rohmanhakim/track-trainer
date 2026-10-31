@@ -14,6 +14,12 @@ import org.robolectric.annotation.Config
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
+import io.github.rohmanhakim.tracktrainer.data.local.SourceType
+import io.github.rohmanhakim.tracktrainer.data.local.Track
+
+private suspend fun insertTrack(database: AppDatabase, id: Long = 1) =
+    database.trackDao().insert(Track(id = id, sourceType = SourceType.LOCAL, sourceRef = "content://test", title = "Test Track"))
+
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [37])
 class LoopPointDaoTest {
@@ -33,6 +39,7 @@ class LoopPointDaoTest {
 
     @Test
     fun insertAndGetById() = runBlocking {
+        insertTrack(database, 1)
         val id = dao.insert(LoopPoint(trackId = 1, label = "Chorus", positionA = 1000, positionB = 5000))
         assertTrue("id should be positive", id > 0)
         val point = dao.getById(id)
@@ -44,6 +51,8 @@ class LoopPointDaoTest {
 
     @Test
     fun observeByTrackReturnsOnlyThatTracksPoints() = runBlocking {
+        insertTrack(database, 1)
+        insertTrack(database, 2)
         dao.insert(LoopPoint(trackId = 1, label = "A", positionA = 0, positionB = 1000))
         dao.insert(LoopPoint(trackId = 2, label = "B", positionA = 0, positionB = 1000))
         val list = dao.observeByTrack(1).first()
@@ -53,6 +62,7 @@ class LoopPointDaoTest {
 
     @Test
     fun updateAndDelete() = runBlocking {
+        insertTrack(database, 1)
         val id = dao.insert(LoopPoint(trackId = 1, label = "A", positionA = 0, positionB = 1000))
         dao.update(LoopPoint(id = id, trackId = 1, label = "B", positionA = 0, positionB = 1000))
         assertEquals("B", dao.getById(id)!!.label)

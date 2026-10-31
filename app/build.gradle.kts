@@ -53,6 +53,18 @@ android {
             isIncludeAndroidResources = true
         }
     }
+
+    // Robolectric 4.17 reflectively accesses jdk.internal.access.SharedSecrets,
+    // which is not exported on JDK 21 (the JBR we run with). Export it so
+    // Robolectric can initialize AndroidTestEnvironment without IllegalAccessException.
+    tasks.withType<Test>().configureEach {
+        if (name.contains("UnitTest")) {
+            jvmArgs(
+                "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
+                "--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED"
+            )
+        }
+    }
 }
 
 // Schemas exported to app/schemas/ and committed (owner decision — see T02 session notes).

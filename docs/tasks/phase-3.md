@@ -156,7 +156,9 @@ Tests (`LoopControllerTest`, 6/6 green, pure JVM + virtual time):
 
 On-device verification: pending — flip `DEBUG_LOOP_SEED` to `true`, set `DEBUG_LOOP_SEED_TRACK_ID` to a test track (>20 s), install on Redmi (`94d32c7b7d78`), measure `loop seam:` deviations via logcat (target ≤100 ms), run 10-min continuous soak, audition seam at 0.5× and 1× with headphones. Any audible pop → file as Phase 5 fade trigger, not a T02 blocker (per acceptance criteria).
 
-Robolectric: `LoopPointDaoTest` (3) + `PresetDaoTest` (4) fail with `IllegalAccessException` at `Robolectric AndroidInterceptors.java:88`. **Pre-existing** — verified by stashing T02 changes; identical failures occur without any T02 code. Likely Robolectric 4.17 / JDK 21 incompatibility. Documented here so T02's "testDebugUnitTest green" DoD is not falsely attributed to T02. Fix: bump Robolectric or adjust test JVM; tracked separately.
+Robolectric/JDK 21 fix: `LoopPointDaoTest` + `PresetDaoTest` were failing with `IllegalAccessException` (Robolectric 4.17 reflectively accesses `jdk.internal.access.SharedSecrets`, not exported on JDK 21). Fixed by adding `--add-opens=java.base/jdk.internal.access=ALL-UNNAMED` and `--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED` to unit test JVM args in `app/build.gradle.kts`. Tests also needed a `Track` row inserted before `LoopPoint`/`Preset` (foreign key enforcement now surfaces with Robolectric working) — added `insertTrack` helper / inline Track inserts in both DAO test files.
+
+Result: **49/49 tests pass, 0 failures** (`LoopControllerTest` 6/6, `LoopPointDaoTest` 3/3, `PresetDaoTest` 4/4, plus all pre-existing test classes).
 
 ## T03 — Loop UI + frame step
 

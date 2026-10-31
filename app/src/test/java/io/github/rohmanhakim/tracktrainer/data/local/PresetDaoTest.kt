@@ -14,6 +14,9 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import kotlinx.coroutines.runBlocking
 
+import io.github.rohmanhakim.tracktrainer.data.local.SourceType
+import io.github.rohmanhakim.tracktrainer.data.local.Track
+
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [37])
 class PresetDaoTest {
@@ -33,6 +36,7 @@ class PresetDaoTest {
 
     @Test
     fun insertAndGetByTrack() = runBlocking {
+        database.trackDao().insert(Track(id = 1, sourceType = SourceType.LOCAL, sourceRef = "content://test", title = "Test Track"))
         val id = dao.insert(Preset(trackId = 1, speed = 1.5f))
         assertTrue("id should be positive", id > 0)
         val preset = dao.getByTrack(1)
@@ -47,6 +51,7 @@ class PresetDaoTest {
 
     @Test
     fun defaultsArePersisted() = runBlocking {
+        database.trackDao().insert(Track(id = 1, sourceType = SourceType.LOCAL, sourceRef = "content://test", title = "Test Track"))
         dao.insert(Preset(trackId = 1))
         val preset = dao.getByTrack(1) ?: error("expected preset")
         assertEquals(1f, preset.speed, 0.001f)
@@ -57,6 +62,7 @@ class PresetDaoTest {
 
     @Test
     fun activeLoopPointIdRoundTrips() = runBlocking {
+        database.trackDao().insert(Track(id = 1, sourceType = SourceType.LOCAL, sourceRef = "content://test", title = "Test Track"))
         val loopId = database.loopPointDao().insert(LoopPoint(trackId = 1, label = "A", positionA = 0, positionB = 1000))
         dao.insert(Preset(trackId = 1, activeLoopPointId = loopId, speed = 0.5f))
         val preset = dao.getByTrack(1) ?: error("expected preset")
