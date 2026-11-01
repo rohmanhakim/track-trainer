@@ -47,7 +47,12 @@ import kotlinx.coroutines.launch
 data class PlayerUiState(
     val isLoading: Boolean = true,
     val title: String = "",
-    val isPlaying: Boolean = false,
+    /**
+     * Transport/keep-screen-on flag: user intent (see [isPlayingIntent]) rather than the
+     * player's transient `isPlaying`, which dips to false whenever the player buffers —
+     * including every loop-seam seek to A (that dip made the button blink).
+     */
+    val isPlayingIntent: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     /** Current playback speed (session-level; 0.25×–2×). */
@@ -206,7 +211,9 @@ class PlayerViewModel @Inject constructor(
 
     fun togglePlayPause() {
         val player = _player.value ?: return
-        if (player.isPlaying) {
+        // Branch on intent, not isPlaying: a tap during the seam's transient buffering
+        // must pause, not silently keep playing.
+        if (isPlayingIntent(player.playWhenReady, player.playbackState)) {
             player.pause()
         } else {
             // At STATE_ENDED playWhenReady is already true, so play() alone is a
@@ -304,7 +311,9 @@ class PlayerViewModel @Inject constructor(
      */
     fun frameStep(forward: Boolean) {
         val player = _player.value ?: return
-        if (player.isPlaying) return
+        // Intent gate: player.isPlaying is transiently false during the seam seek's
+        // buffering — a step tap in that window must not sneak a seek into a live loop.
+        if (isPlayingIntent(player.playWhenReady, player.playbackState)) return
         val durationMs = _uiState.value.durationMs
         val current = player.currentPosition
         val frameRate = player.videoFormat?.frameRate ?: 0f
@@ -365,11 +374,10 @@ class PlayerViewModel @Inject constructor(
             .apply { currentCacheKey?.let { setCustomCacheKey(it) } }
             .build()
         val listener = object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                _uiState.update { it.copy(isPlaying = isPlaying) }
-            }
-
             override fun onPlayerStateChanged(playWhenReady: Boolean, state: Int) {
+                // Intent, not isPlaying: the seam seek's transient buffering must not
+                // flip the transport button to "Play" (the loop-seam blink bug).
+                _uiState.update { it.copy(isPlayingIntent = isPlayingIntent(playWhenReady, state)) }
                 if (state == Player.STATE_ENDED) {
                     // Whole stream has flowed through the cache: offline replay is now
                     // guaranteed (P2-3) and the dot can show in the library.

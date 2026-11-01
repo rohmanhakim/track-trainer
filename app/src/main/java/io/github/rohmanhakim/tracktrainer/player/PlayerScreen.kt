@@ -61,11 +61,13 @@ fun PlayerScreen(
         onBack()
     }
 
-    // P1-5: awake only while actually playing; onDispose resets so the library
+    // P1-5: awake while playback is armed; onDispose resets so the library
     // screen can't inherit a stale keep-screen-on after back-navigation.
+    // Intent (not transient isPlaying) so the seam seek's buffering flicker
+    // doesn't toggle the flag every loop.
     val view = LocalView.current
-    DisposableEffect(uiState.isPlaying) {
-        view.keepScreenOn = uiState.isPlaying
+    DisposableEffect(uiState.isPlayingIntent) {
+        view.keepScreenOn = uiState.isPlayingIntent
         onDispose { view.keepScreenOn = false }
     }
 

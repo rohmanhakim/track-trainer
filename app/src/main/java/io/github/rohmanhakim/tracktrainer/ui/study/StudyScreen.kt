@@ -273,7 +273,7 @@ private fun PortraitStudy(
             else -> ControlSurface(
                 positionMs = uiState.positionMs,
                 durationMs = uiState.durationMs,
-                isPlaying = uiState.isPlaying,
+                isPlaying = uiState.isPlayingIntent,
                 speed = speed,
                 onTogglePlayPause = onTogglePlayPause,
                 onSeek = onSeek,
@@ -404,7 +404,7 @@ private fun LandscapeFallback(
                 Transport(
                     positionMs = uiState.positionMs,
                     durationMs = uiState.durationMs,
-                    isPlaying = uiState.isPlaying,
+                    isPlaying = uiState.isPlayingIntent,
                     onTogglePlayPause = onTogglePlayPause,
                     onSeek = onSeek,
                     modifier = Modifier.padding(horizontal = 16.dp),
