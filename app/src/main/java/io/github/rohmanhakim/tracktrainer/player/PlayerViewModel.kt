@@ -21,9 +21,11 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.rohmanhakim.tracktrainer.cache.CacheBookkeeper
 import io.github.rohmanhakim.tracktrainer.cache.CacheKeyFactory
 import io.github.rohmanhakim.tracktrainer.data.local.LoopPoint
+import io.github.rohmanhakim.tracktrainer.data.local.Preset
 import io.github.rohmanhakim.tracktrainer.data.local.SourceType
 import io.github.rohmanhakim.tracktrainer.data.local.Track
 import io.github.rohmanhakim.tracktrainer.data.repo.LoopRepository
+import io.github.rohmanhakim.tracktrainer.data.repo.PresetRepository
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackHealthChecker
 import io.github.rohmanhakim.tracktrainer.data.repo.TrackRepository
 import io.github.rohmanhakim.tracktrainer.loop.ExoLoopPlayer
@@ -42,6 +44,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /** What the player screen renders: one track's transport state. */
 data class PlayerUiState(
@@ -99,6 +102,7 @@ class PlayerViewModel @Inject constructor(
     private val repository: TrackRepository,
     private val healthChecker: TrackHealthChecker,
     private val loopRepository: LoopRepository,
+    private val presetRepository: PresetRepository,
     private val cacheDataSourceFactory: CacheDataSource.Factory,
     private val bookkeeper: CacheBookkeeper,
     private val cache: SimpleCache,
@@ -125,6 +129,10 @@ class PlayerViewModel @Inject constructor(
     private var playerListener: Player.Listener? = null
     /** Loop engine; outlives a single ExoPlayer so A/B survive player rebuilds (rotation). */
     private val loopController = LoopController(viewModelScope)
+    /** Debounced preset auto-save; settled on release/clear so no change is lost (P3-4). */
+    private val presetAutoSaver = PresetAutoSaver(viewModelScope) { presetRepository.upsert(it) }
+    /** True while a preset restore is being applied — restore is not a user change. */
+    private var applyingPreset = false
 
     init {
         // Log every loop seam so P3-2 deviation can be measured on-device via logcat.
@@ -154,6 +162,8 @@ class PlayerViewModel @Inject constructor(
         reextractAttempted = false
         loopPointsJob?.cancel()
         viewModelScope.launch {
+            // Settle any pending preset write from the previous track before this one starts.
+            presetAutoSaver.flush()
             _uiState.update { it.copy(isLoading = true, title = it.title, loopPoints = emptyList()) }
             val track = repository.getById(trackId)
             if (track == null) {
@@ -161,6 +171,9 @@ class PlayerViewModel @Inject constructor(
                 return@launch
             }
             _uiState.update { it.copy(title = track.title) }
+            // Stale A/B from a previously open track must not leak here (or into this
+            // track's preset); restorePreset applies this track's saved preset below.
+            loopController.clear()
             // Observe this track's saved loop points so the UI can list/restore them (P3-1, P3-4).
             loopPointsJob = viewModelScope.launch {
                 loopRepository.observeLoopPoints(track.id).collect { points ->
@@ -181,6 +194,7 @@ class PlayerViewModel @Inject constructor(
                 if (cacheKey != null && withContext(Dispatchers.IO) { isTrackCached(cacheKey) }) {
                     Log.d(TAG, "cache hit — zero extraction for YouTube track $trackId (key=$cacheKey)")
                     startPlayer(track)
+                    restorePreset(track.id)
                     return@launch
                 }
                 val resolved = withContext(Dispatchers.IO) { extractor.resolve(track.sourceRef) }
@@ -191,6 +205,7 @@ class PlayerViewModel @Inject constructor(
                 )
                 withContext(Dispatchers.IO) { repository.update(updatedTrack) }
                 startPlayer(updatedTrack)
+                restorePreset(track.id)
                 return@launch
             }
             // P2-8: a direct track whose cached copy is gone can never play — prompt
@@ -206,6 +221,7 @@ class PlayerViewModel @Inject constructor(
                 return@launch
             }
             startPlayer(track)
+            restorePreset(track.id)
         }
     }
 
@@ -244,29 +260,48 @@ class PlayerViewModel @Inject constructor(
         val clamped = speed.coerceIn(0.25f, 2.0f)
         currentSpeed = clamped
         _uiState.update { it.copy(speed = clamped) }
+        schedulePresetSave()
         val player = _player.value ?: return
         player.setPlaybackParameters(PlaybackParameters(clamped))
     }
 
-    /** Sets loop point A to the current playhead position (tap to set / move). */
+    /**
+     * Sets loop point A to the current playhead position (tap to set / move).
+     * Manual A/B edits drop the active loop point: the bounds no longer match the
+     * named point, so preset restore must not resurrect its stale bounds.
+     */
     fun setLoopA() {
         val player = _player.value ?: return
+        loopController.setActiveLoopPoint(null)
         loopController.setA(player.currentPosition)
+        schedulePresetSave()
     }
 
-    /** Sets loop point B to the current playhead position (tap to set / move). */
+    /** Sets loop point B to the current playhead position (tap to set / move). See [setLoopA]. */
     fun setLoopB() {
         val player = _player.value ?: return
+        loopController.setActiveLoopPoint(null)
         loopController.setB(player.currentPosition)
+        schedulePresetSave()
     }
 
-    fun clearLoopA() = loopController.clearA()
-    fun clearLoopB() = loopController.clearB()
+    fun clearLoopA() {
+        loopController.setActiveLoopPoint(null)
+        loopController.clearA()
+        schedulePresetSave()
+    }
+
+    fun clearLoopB() {
+        loopController.setActiveLoopPoint(null)
+        loopController.clearB()
+        schedulePresetSave()
+    }
 
     /** Toggles loop repetition on/off (loop-until-off). */
     fun toggleLoop() {
         val s = loopController.state.value
         loopController.setLoopEnabled(!s.loopEnabled)
+        schedulePresetSave()
     }
 
     /** Saves the current A/B as a new named loop point (always creates; never overwrites). */
@@ -278,6 +313,7 @@ class PlayerViewModel @Inject constructor(
         val id = loopRepository.add(point)
         loopController.setActiveLoopPoint(id)
         loopController.setLoopEnabled(true)
+        schedulePresetSave()
     }
 
     /** Loads a saved loop point's A/B into the controller and marks it active. */
@@ -287,6 +323,7 @@ class PlayerViewModel @Inject constructor(
         loopController.setB(point.positionB)
         loopController.setActiveLoopPoint(id)
         loopController.setLoopEnabled(true)
+        schedulePresetSave()
     }
 
     suspend fun renameLoopPoint(id: Long, label: String) {
@@ -300,8 +337,50 @@ class PlayerViewModel @Inject constructor(
         if (s.activeLoopPointId == id) {
             loopController.setActiveLoopPoint(null)
             loopController.setLoopEnabled(false)
+            schedulePresetSave()
         }
         loopRepository.remove(point)
+    }
+
+    /** Persists the current speed + loop state for the open track (debounced, P3-4). */
+    private fun schedulePresetSave() {
+        if (applyingPreset) return // restore is not a user change — never write it back
+        val trackId = openedTrackId ?: return
+        val s = loopController.state.value
+        presetAutoSaver.schedule(
+            Preset(
+                trackId = trackId,
+                activeLoopPointId = s.activeLoopPointId,
+                loopEnabled = s.loopEnabled,
+                speed = currentSpeed,
+            ),
+        )
+    }
+
+    /**
+     * Applies the track's saved preset once the player is up (P3-4): preset wins over the
+     * session-level speed; no preset ⇒ the session-level speed is the starting default and
+     * no row is written for untouched tracks. An armed active loop point starts playback at
+     * A (alignToAOnArm — same semantics as selectLoopPoint). Unsaved ad-hoc A/B bounds are
+     * not in the V1 schema, so with no resolvable loop point the loop comes up off.
+     */
+    private suspend fun restorePreset(trackId: Long) {
+        val preset = presetRepository.getByTrack(trackId)
+        applyingPreset = true
+        try {
+            setSpeed(preset?.speed ?: currentSpeed)
+            val point = preset?.activeLoopPointId?.let { loopRepository.getById(it) }
+            if (preset != null && point != null) {
+                loopController.setA(point.positionA)
+                loopController.setB(point.positionB)
+                loopController.setActiveLoopPoint(point.id)
+                loopController.setLoopEnabled(preset.loopEnabled)
+            } else {
+                loopController.setLoopEnabled(false)
+            }
+        } finally {
+            applyingPreset = false
+        }
     }
 
     /**
@@ -341,6 +420,9 @@ class PlayerViewModel @Inject constructor(
 
     override fun onCleared() {
         releaseInternal()
+        // viewModelScope is already cancelled at this point; block briefly on one small
+        // Room upsert rather than lose the owner's pending preset change (P3-4).
+        runBlocking(Dispatchers.IO) { presetAutoSaver.flush() }
     }
 
     private fun startPlayer(track: Track) {
@@ -548,6 +630,10 @@ class PlayerViewModel @Inject constructor(
         playerListener = null
         currentCacheKey = null
         _player.value = null
+        // Settle any debounced preset write now — teardown must never drop the last change.
+        // (No-op when called from onCleared: the scope is already cancelled and the
+        // runBlocking flush there covers it.)
+        viewModelScope.launch { presetAutoSaver.flush() }
     }
 
     private companion object {

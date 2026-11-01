@@ -21,6 +21,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -88,10 +89,10 @@ fun StudyScreen(
 
     // Rename / delete dialog state (Phase 3 loop points).
     var renameDialogOpen by remember { mutableStateOf(false) }
-    var renameId by remember { mutableStateOf(-1L) }
+    var renameId by remember { mutableLongStateOf(-1L) }
     var renameName by remember { mutableStateOf("") }
     var deleteDialogOpen by remember { mutableStateOf(false) }
-    var deleteId by remember { mutableStateOf(-1L) }
+    var deleteId by remember { mutableLongStateOf(-1L) }
 
     Scaffold(
         modifier = modifier,

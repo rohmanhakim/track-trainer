@@ -6,7 +6,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Track::class, LoopPoint::class, Preset::class], version = 4, exportSchema = true)
+@Database(entities = [Track::class, LoopPoint::class, Preset::class], version = 5, exportSchema = true)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao
@@ -65,6 +65,17 @@ abstract class AppDatabase : RoomDatabase() {
                 """.trimIndent())
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_presets_trackId ON presets (trackId)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_presets_activeLoopPointId ON presets (activeLoopPointId)")
+            }
+        }
+
+        /**
+         * Non-destructive: adds `loopEnabled` so preset restore is exact — loop-off stays
+         * off across reopens (P3-4, owner-approved schema amendment 2026-11-01). Existing
+         * rows default to 0 (never auto-arm a loop the owner can't see coming).
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE presets ADD COLUMN loopEnabled INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

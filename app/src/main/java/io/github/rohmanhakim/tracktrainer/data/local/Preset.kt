@@ -36,6 +36,8 @@ data class Preset(
     val trackId: Long,
     /** The active loop point, or null when no loop is saved for the track. */
     val activeLoopPointId: Long? = null,
+    /** Whether the A-B loop was armed when last saved (P3-4 exact restore). */
+    val loopEnabled: Boolean = false,
     /** Playback speed multiplier (1.0 = normal speed). */
     val speed: Float = 1f,
     /** Semitone transpose. Reserved for a future phase; unused in V1. */

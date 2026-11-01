@@ -24,7 +24,7 @@ and per-session status/notes.
 | T01 | Data layer: `LoopPoint` + `Preset` entities, DAOs, repos, Room migration 3→4 | done | feeds P3-1, P3-4 |
 | T02 | Loop engine: position-poll loop controller, `CLOSEST_SYNC` seek to A, loop-until-off | done | P3-2, P3-3 |
 | T03 | Loop UI + frame step: A/B markers, loop toggle, named loop points list, frame step ±1 | done | P3-1, P3-5 |
-| T04 | Preset persistence & restore: debounced auto-save, restore on open | not-started | P3-4 |
+| T04 | Preset persistence & restore: debounced auto-save, restore on open | done | P3-4 |
 | T05 | Phase 3 review & exit sweep | not-started | all P3-x |
 
 **Order:** T01 → T02 → T03 → T04 → T05 (Kanban WIP limit: one feature at a
@@ -317,7 +317,7 @@ soak, seam audition at 0.5×/1×) are folded into this session per decision D2.
 
 ## T04 — Preset persistence & restore
 
-**Status:** not-started · **Depends on:** T01, T03 · **Stories:** P3-4
+**Status:** done · **Depends on:** T01, T03 · **Stories:** P3-4
 
 ### Goal
 Per-track presets: auto-save (debounced) speed + active loop point + loop-on
@@ -348,14 +348,65 @@ and reapply across rotation/player rebuild.
 - Restore happens in `openTrack` after the track loads, before `startPlayer`.
 
 ### Acceptance
-- [ ] On-device: reopening a track restores speed + loop points (P3-4).
-- [ ] On-device: preset wins over session-level default; session-level speed is
+- [x] On-device: reopening a track restores speed + loop points (P3-4).
+- [x] On-device: preset wins over session-level default; session-level speed is
       the starting default for tracks with no saved preset.
-- [ ] Speed + loop survive rotation and player rebuild (no regression of P1-4).
-- [ ] `assembleDebug` + `testDebugUnitTest` green, zero new warnings.
+- [x] Speed + loop survive rotation and player rebuild (no regression of P1-4).
+- [x] `assembleDebug` + `testDebugUnitTest` green, zero new warnings.
 
 ### Session notes
-(empty — fill during session)
+**2026-11-01: T04 code complete — owner interactive matrix passed (all boxes checked; closed in T05 sweep).**
+
+What was built:
+- **Schema (owner-approved amendment):** `Preset.loopEnabled` column for exact
+  loop-on restore, Room migration **4→5** (`ALTER TABLE presets ADD COLUMN
+  loopEnabled INTEGER NOT NULL DEFAULT 0` — existing rows default off; never
+  auto-arm a loop the owner can't see coming), schema v5 exported
+  (`app/schemas/…/5.json`), `02-architecture` §4 updated. Decision context: T04's
+  "restore loop-on" contradicted the V1 `Preset` schema (no loop-enabled column) —
+  owner chose adding the column over deriving loop-on from `activeLoopPointId`.
+- `player/PresetAutoSaver.kt` — debounced (500 ms) auto-save coordinator: coalesces
+  rapid changes into one write; a cross-track `schedule` writes the old snapshot
+  immediately (never drops the previous track's pending change); `flush()` settles
+  pending writes (cancel + join; the write itself is `NonCancellable`).
+- `PlayerViewModel` wiring: `restorePreset(trackId)` runs after `startPlayer` on all
+  three open paths. Preset wins over session-level `currentSpeed`; no preset ⇒
+  session-level speed is the starting default and **no row is written** for
+  untouched tracks (restore is suppressed from auto-save via `applyingPreset`).
+  Saves scheduled from `setSpeed`, `setLoopA/B`, `clearLoopA/B`, `toggleLoop`,
+  `saveLoopPoint`, `selectLoopPoint`, `deleteLoopPoint`. Flush on `releaseInternal`;
+  `onCleared` does a bounded `runBlocking(Dispatchers.IO)` flush (viewModelScope is
+  already cancelled there) — no data loss on release/clear.
+- Behavior decisions (documented in code):
+  - Armed active loop point starts playback at A on open (`alignToAOnArm` — same
+    semantics as tapping a loop point in the list).
+  - `loopEnabled = true` with no resolvable loop point (ad-hoc A/B never saved as a
+    named point — bounds aren't in the V1 schema) restores loop **off**.
+  - Manual A/B edits (`setLoopA/B`, `clear*`) clear `activeLoopPointId`: the bounds
+    no longer match the named point, so restore must not resurrect its stale bounds.
+  - Stale loop state cleared at `openTrack` (`loopController.clear()`) — latent bug
+    fixed: A/B from a previously open track could leak across tracks (and into the
+    next track's saved preset).
+  - `uiState.speed` synced at open — latent bug fixed: after release + reopen the
+    speed chip showed 1× while playback ran at the session speed.
+- Tests: `AppDatabaseMigration45Test` (3 — real file-backed v4 DDL → Room opens at
+  v5; rows preserved; loopEnabled defaults off; round-trips; idempotent re-open),
+  `PresetDaoTest` +2, `PresetAutoSaverTest` (5 — coalescing, flush, no-op flush,
+  cross-track ordering, loop fields). **70 tests total, 0 failures.**
+- Gates: `assembleDebug` + `testDebugUnitTest` (70) + `lintDebug` green. Lint tally
+  14 (12 warnings + 2 hints), all pre-existing, none in the changed files.
+- On-device (automated part): `installDebug` on Redmi `94d32c7b7d78`; app launches
+  clean over the real dev DB — **MIGRATION_4_5 applied on-device, 7 tracks intact**
+  (`Track DB ready, tracks=7`, no AndroidRuntime errors).
+
+Owner interactive matrix (Redmi) — all passed:
+- [x] Reopen a track with saved speed + active armed loop → both restored (P3-4).
+- [x] Preset wins over session default; untouched track opens at session speed.
+- [x] Loop-off with an active point → reopen → stays off (the exact-restore case).
+- [x] Rotation mid-play: speed + A/B + loop-on survive (P1-4 no regression).
+- [x] Swipe-away (process death) → reopen → still restored.
+- [x] Rapid speed-slider drag → no jank, few DB writes (optional logcat look).
+
 ## T05 — Phase 3 review & exit sweep
 
 **Status:** not-started · **Depends on:** T01–T04 · **Stories:** all P3-x

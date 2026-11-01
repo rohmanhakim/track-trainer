@@ -2,6 +2,7 @@ package io.github.rohmanhakim.tracktrainer.data.local
 
 import androidx.room.Room
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -58,6 +59,16 @@ class PresetDaoTest {
         assertEquals(4, preset.countInClicks)
         assertNull(preset.activeLoopPointId)
         assertEquals(ClickSound.CLICK, preset.clickSound)
+        assertFalse(preset.loopEnabled)
+    }
+
+    @Test
+    fun loopEnabledRoundTrips() = runBlocking {
+        database.trackDao().insert(Track(id = 1, sourceType = SourceType.LOCAL, sourceRef = "content://test", title = "Test Track"))
+        dao.insert(Preset(trackId = 1, loopEnabled = true))
+        assertTrue(dao.getByTrack(1)!!.loopEnabled)
+        dao.update(dao.getByTrack(1)!!.copy(loopEnabled = false))
+        assertFalse(dao.getByTrack(1)!!.loopEnabled)
     }
 
     @Test
