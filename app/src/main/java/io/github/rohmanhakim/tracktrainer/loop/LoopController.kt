@@ -66,8 +66,12 @@ class LoopController(
     private val _state = MutableStateFlow(LoopState())
     val state: StateFlow<LoopState> = _state.asStateFlow()
 
-    /** Emits one [SeamEvent] each time the loop seeks back to A. */
-    private val _seamEvents = MutableSharedFlow<SeamEvent>()
+    /**
+     * Emits one [SeamEvent] each time the loop seeks back to A. Buffered so a busy
+     * collector never loses events — a zero-capacity SharedFlow's tryEmit silently
+     * drops whenever the collector isn't ready at that instant.
+     */
+    private val _seamEvents = MutableSharedFlow<SeamEvent>(extraBufferCapacity = 16)
     val seamEvents: Flow<SeamEvent> = _seamEvents.asFlow()
 
     private var player: LoopPlayer? = null
@@ -121,7 +125,12 @@ class LoopController(
                 pos >= s.positionB
             ) {
                 val overrunMs = pos - s.positionB
-                _seamEvents.tryEmit(SeamEvent(pos, s.positionA, overrunMs))
+                val event = SeamEvent(pos, s.positionA, overrunMs)
+                // tryEmit can only fail if the 16-slot buffer overflows; fall back to a
+                // suspending emit rather than silently dropping the seam record.
+                if (!_seamEvents.tryEmit(event)) {
+                    scope.launch { _seamEvents.emit(event) }
+                }
                 seekToA(current)
             }
         }

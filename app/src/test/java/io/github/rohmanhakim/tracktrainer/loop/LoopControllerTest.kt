@@ -6,8 +6,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.OptIn
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -152,6 +155,67 @@ class LoopControllerTest {
             // Seam fired: seek to A happened, overrun (5030 - 5000 = 30) is within tolerance
             assertEquals(listOf(1000L), player.seekToCalls)
 
+            controller.detach()
+        }
+    }
+
+    @Test
+    fun seamEventIsEmittedForEachSeam() = runBlocking {
+        runTest {
+            val player = FakeLoopPlayer()
+            val controller = LoopController(this, pollIntervalMs = 40)
+            val events = mutableListOf<SeamEvent>()
+            val collector = launch { controller.seamEvents.collect { events += it } }
+            controller.attach(player)
+            controller.setA(1000)
+            controller.setB(5000)
+            controller.setLoopEnabled(true)
+            player.isPlayingValue = true
+
+            player.positionMs = 5030
+            advanceTimeBy(41) // tick at 40 → seam with 30 ms overrun
+            runCurrent()
+
+            assertEquals(1, events.size)
+            assertEquals(5030L, events[0].boundaryPositionMs)
+            assertEquals(1000L, events[0].seekToMs)
+            assertEquals(30L, events[0].overrunMs)
+
+            collector.cancel()
+            controller.detach()
+        }
+    }
+
+    @Test
+    fun seamEventsAreNotDroppedWhileCollectorIsBusy() = runBlocking {
+        runTest {
+            val player = FakeLoopPlayer()
+            val controller = LoopController(this, pollIntervalMs = 40)
+            val events = mutableListOf<SeamEvent>()
+            // Collector takes 200 ms per event — busier than the 40 ms poll. A
+            // zero-capacity SharedFlow + tryEmit silently drops here (the on-device
+            // "0 seam events" bug); the buffered flow must deliver both.
+            val collector = launch {
+                controller.seamEvents.collect {
+                    events += it
+                    delay(200)
+                }
+            }
+            controller.attach(player)
+            controller.setA(1000)
+            controller.setB(5000)
+            controller.setLoopEnabled(true)
+            player.isPlayingValue = true
+
+            player.positionMs = 5000
+            advanceTimeBy(41) // seam 1 at tick 40 → collector busy until ~240
+            player.positionMs = 5000
+            advanceTimeBy(41) // seam 2 at tick 80 → collector still busy → must not drop
+            advanceTimeBy(300) // let the collector drain the buffer
+
+            assertEquals(listOf(5000L, 5000L), events.map { it.boundaryPositionMs })
+
+            collector.cancel()
             controller.detach()
         }
     }
