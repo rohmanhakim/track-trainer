@@ -54,12 +54,15 @@ fun PlayerScreen(
 
     LaunchedEffect(trackId) { viewModel.openTrack(trackId) }
 
-    // System back while the player is open: release first so no audio leaks, then
-    // let the owner's manual nav state drop back to the library.
-    BackHandler {
+    // Every exit path (system back, top-bar arrow, error dialog) tears the player down
+    // first so no audio leaks to the library: the ViewModel is activity-scoped and
+    // survives leaving composition, so release can't rely on store clearing. Idempotent —
+    // safe when an error already tore the player down.
+    val onLeave = {
         viewModel.releasePlayer()
         onBack()
     }
+    BackHandler(onBack = onLeave)
 
     // P1-5: awake while playback is armed; onDispose resets so the library
     // screen can't inherit a stale keep-screen-on after back-navigation.
@@ -91,7 +94,7 @@ fun PlayerScreen(
     StudyScreen(
         uiState = uiState,
         player = player,
-        onBack = onBack,
+        onBack = onLeave,
         onTogglePlayPause = { viewModel.togglePlayPause() },
         onSeek = { viewModel.seekTo(it) },
         speed = uiState.speed,
@@ -146,7 +149,7 @@ fun PlayerScreen(
                         if (isExpired) {
                             if (rePasteInputState.value.isNotBlank()) viewModel.rePaste(trackId, rePasteInputState.value)
                         } else {
-                            onBack()
+                            onLeave()
                         }
                     },
                     enabled = !isExpired || rePasteInputState.value.isNotBlank(),

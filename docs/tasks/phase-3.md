@@ -233,7 +233,25 @@ soak, seam audition at 0.5×/1×) are folded into this session per decision D2.
       `seamEventIsEmittedForEachSeam` + `seamEventsAreNotDroppedWhileCollectorIsBusy`
       fail against the old code, pass with the fix. Verified on Redmi: `loop seam:`
       logcat flows (130 seams captured during the soak).
-
+- [x] on navigating to Study Activity, when the playhead haven't reached the timestamp within a loop's point A and B, but user selected a loop and make it active (the `Loop` chip is active) the loop does not looping until the playhead exceeds point A of that loop
+      — **RESOLVED (2026-11-01).** Root cause: `LoopController` only sought to A when the
+      playhead passed B — nothing happened at arm time. Fix (owner decision):
+      seek-to-A-on-arm — `setLoopEnabled(true)` now aligns the playhead to A whenever it is
+      outside [A, B) (covers both this before-A case and the earlier "armed past B" catch-up
+      seam), reusing the seam mute mask but emitting **no** `SeamEvent` so P3-2 seam stats
+      only measure real B→A passes. Verified on Redmi: Select on "Loop 1" (0:10–0:15) with
+      the playhead paused at 0:01 jumped to 0:10 instantly, zero `loop seam:` lines at arm;
+      loop cadence after Play 5.15 s, overruns 21–27 ms.
+- [x] when a playback is playing then user navigates back to Track List screen without pausing the track, the track still playing in the background while the screen is Track List screen
+      — **RESOLVED (2026-11-01).** Root cause: only the system-back `BackHandler` called
+      `releasePlayer()`; the TopAppBar back arrow was wired to the raw `onBack`, and the
+      activity-scoped `PlayerViewModel` survives leaving composition — so player + audio
+      leaked onto the Track List screen. Fix: one `onLeave` handler (release → back) now
+      serves all three exits (system back, top-bar arrow, error dialog). Verified on Redmi:
+      Back-while-playing via arrow → Track List + `dumpsys audio` shows our AudioTrack idle;
+      system back → Track List + player fully released; reopening rebuilds and plays from
+      cache. Background audio stays Phase 7 (F13) scope — this restores the documented
+      interim "back releases the player" contract.
 
 ### Session notes
 - Implemented: `player/PlayerViewModel` (loopState/loopPoints on `PlayerUiState`,
@@ -268,12 +286,34 @@ soak, seam audition at 0.5×/1×) are folded into this session per decision D2.
   - Gates: `assembleDebug` + `testDebugUnitTest` (56 tests) + `lintDebug` green,
     zero new warnings (12 lint warnings are pre-existing: dependency-version notices,
     unused strings, Phase-1 `DefaultLocale`/`OldTargetApi`).
-  - Grooming note (not implemented — no scope growth): arming the loop while playback
-    is already past B seeks to A on the first poll (one catch-up seam; observed 10.8 s
-    overrun on arm). Consider seek-to-A-on-arm → Phase 4+ grooming.
+  - Grooming note — **implemented same-day in the remaining-issues fix below** (owner
+    decision): arming the loop while playback is already past B used to seek to A on the
+    first poll (one catch-up seam; observed 10.8 s overrun on arm). Now handled by
+    seek-to-A-on-arm; nothing left for Phase 4+ grooming.
   - Verification tooling note: `adb logcat` without `-T` replays the ring buffer first;
     the buffer only holds ~7 min of TrackTrainer output, so long soaks need a
     persistent capture (`adb logcat -s TrackTrainer > file`).
+- **2026-11-01: T03 remaining-issues fix (2 bugs, both verified on Redmi `94d32c7b7d78`).**
+  - Seek-to-A-on-arm (`loop/LoopController.kt`): `setLoopEnabled(true)` → `alignToAOnArm()` —
+    playhead outside [A, B) at arm time seeks to A immediately (before-A and past-B cases),
+    through the seam mute mask but without a `SeamEvent` (an arm seek is not a boundary
+    crossing — keeps P3-2 deviation stats honest and kills the past-B catch-up seam).
+  - Back-leak fix (`player/PlayerScreen.kt`): one `onLeave` (release → back) for all three
+    exit paths (system `BackHandler`, StudyScreen top-bar arrow, error dialog). The arrow
+    previously bypassed `releasePlayer()`, so the activity-scoped VM kept playing audio on
+    the Track List screen.
+  - `LoopControllerTest` 5 new arm-time cases (before-A, past-B, inside-range, unset/inverted
+    bounds, mute-mask restore); 6 existing fixtures now arm from inside [A, B) — arming from
+    outside intentionally seeks. Note: `advanceTimeBy(5)` does not run a task scheduled at
+    the exact boundary — the volume-restore assertion needs a `runCurrent()` flush.
+  - Device matrix (10:29–10:32): arm before A at paused 0:01 → instant jump to 0:10 (no fake
+    seam log); loop cadence 5.15 s, overruns 21–27 ms; arrow-Back while playing → Track List
+    + AudioTrack idle; system back → Track List + player fully released; reopen → cache-hit
+    playback (player rebuild after release OK).
+  - Gates: `assembleDebug` + `testDebugUnitTest` (61 tests) + `lintDebug` green. Lint tally
+    14 warnings, all pre-existing, none in the changed files. T05 note: the earlier "12
+    warnings" tally missed 2 `AutoboxingStateCreation` hits (`StudyScreen.kt:91,94` —
+    `renameId`/`deleteId` should be `mutableLongStateOf`; T03 dialog code, trivial fix).
 
 ## T04 — Preset persistence & restore
 

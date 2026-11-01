@@ -41,6 +41,7 @@ class LoopControllerTest {
             controller.attach(player)
             controller.setA(1000)
             controller.setB(5000)
+            player.positionMs = 2000 // inside [A, B): arming aligns only outside the range
             controller.setLoopEnabled(true)
             player.isPlayingValue = true
 
@@ -70,6 +71,7 @@ class LoopControllerTest {
             controller.attach(player)
             controller.setA(1000)
             controller.setB(5000)
+            player.positionMs = 2000 // inside [A, B): arming aligns only outside the range
             controller.setLoopEnabled(true)
             player.isPlayingValue = true
 
@@ -110,6 +112,7 @@ class LoopControllerTest {
             controller.attach(player)
             controller.setA(1000)
             controller.setB(5000)
+            player.positionMs = 2000 // inside [A, B): arming aligns only outside the range
             controller.setLoopEnabled(true)
             // isPlayingValue stays false
 
@@ -146,6 +149,7 @@ class LoopControllerTest {
             controller.attach(player)
             controller.setA(1000)
             controller.setB(5000)
+            player.positionMs = 2000 // inside [A, B): arming aligns only outside the range
             controller.setLoopEnabled(true)
             player.isPlayingValue = true
 
@@ -169,6 +173,7 @@ class LoopControllerTest {
             controller.attach(player)
             controller.setA(1000)
             controller.setB(5000)
+            player.positionMs = 2000 // inside [A, B): arming aligns only outside the range
             controller.setLoopEnabled(true)
             player.isPlayingValue = true
 
@@ -204,6 +209,7 @@ class LoopControllerTest {
             controller.attach(player)
             controller.setA(1000)
             controller.setB(5000)
+            player.positionMs = 2000 // inside [A, B): arming aligns only outside the range
             controller.setLoopEnabled(true)
             player.isPlayingValue = true
 
@@ -216,6 +222,114 @@ class LoopControllerTest {
             assertEquals(listOf(5000L, 5000L), events.map { it.boundaryPositionMs })
 
             collector.cancel()
+            controller.detach()
+        }
+    }
+
+    @Test
+    fun armingBeforeASeeksToAWithoutSeamEvent() = runBlocking {
+        runTest {
+            val player = FakeLoopPlayer()
+            val controller = LoopController(this, pollIntervalMs = 40)
+            val events = mutableListOf<SeamEvent>()
+            val collector = launch { controller.seamEvents.collect { events += it } }
+            controller.attach(player)
+            controller.setA(1000)
+            controller.setB(5000)
+            player.positionMs = 0 // before A → arming must jump straight to A
+            controller.setLoopEnabled(true)
+            runCurrent()
+
+            assertEquals(listOf(1000L), player.seekToCalls)
+            assertTrue(events.isEmpty()) // arm-time alignment is not a seam
+
+            collector.cancel()
+            controller.detach()
+        }
+    }
+
+    @Test
+    fun armingPastBSeeksToAWithoutCatchUpSeam() = runBlocking {
+        runTest {
+            val player = FakeLoopPlayer()
+            val controller = LoopController(this, pollIntervalMs = 40)
+            val events = mutableListOf<SeamEvent>()
+            val collector = launch { controller.seamEvents.collect { events += it } }
+            controller.attach(player)
+            controller.setA(1000)
+            controller.setB(5000)
+            player.positionMs = 9000 // past B → used to play on until a catch-up seam
+            controller.setLoopEnabled(true)
+            runCurrent()
+
+            assertEquals(listOf(1000L), player.seekToCalls)
+            assertTrue(events.isEmpty()) // no fake seam / overrun stat at arm
+
+            collector.cancel()
+            controller.detach()
+        }
+    }
+
+    @Test
+    fun armingInsideRangeDoesNotSeek() = runBlocking {
+        runTest {
+            val player = FakeLoopPlayer()
+            val controller = LoopController(this, pollIntervalMs = 40)
+            controller.attach(player)
+            controller.setA(1000)
+            controller.setB(5000)
+            player.positionMs = 2000
+            controller.setLoopEnabled(true)
+
+            assertTrue(player.seekToCalls.isEmpty())
+
+            controller.setLoopEnabled(false)
+            player.positionMs = 0 // disarming never re-aligns the playhead
+            assertTrue(player.seekToCalls.isEmpty())
+
+            controller.detach()
+        }
+    }
+
+    @Test
+    fun armingWithUnsetOrInvertedBoundsDoesNotSeek() = runBlocking {
+        runTest {
+            val player = FakeLoopPlayer()
+            val controller = LoopController(this, pollIntervalMs = 40)
+            controller.attach(player)
+            player.positionMs = 0
+
+            controller.setLoopEnabled(true) // no points at all
+            assertTrue(player.seekToCalls.isEmpty())
+
+            controller.setA(1000) // B still unset
+            controller.setLoopEnabled(true)
+            assertTrue(player.seekToCalls.isEmpty())
+
+            controller.setB(500) // inverted
+            controller.setLoopEnabled(true)
+            assertTrue(player.seekToCalls.isEmpty())
+
+            controller.detach()
+        }
+    }
+
+    @Test
+    fun armSeekMutesThenRestoresVolume() = runBlocking {
+        runTest {
+            val player = FakeLoopPlayer().apply { setVolume(0.7f) }
+            val controller = LoopController(this, seamFadeMs = 5)
+            controller.attach(player)
+            controller.setA(1000)
+            controller.setB(5000)
+            player.positionMs = 0
+            controller.setLoopEnabled(true) // arm-seek masks the seek pop like a seam
+
+            assertEquals(0f, player.volume)
+            advanceTimeBy(5) // restore job fires at +5 ms
+            runCurrent() // tasks at the exact advance boundary need an explicit flush
+            assertEquals(0.7f, player.volume)
+
             controller.detach()
         }
     }

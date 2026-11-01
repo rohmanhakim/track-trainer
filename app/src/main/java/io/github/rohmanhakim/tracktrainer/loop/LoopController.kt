@@ -53,7 +53,8 @@ interface LoopPlayer {
  * A-B loop engine: polls position ~40 ms and seeks to A when passing B.
  *
  * Loops until the owner toggles off (no repeat counts). The seam is masked with a
- * best-effort ~5 ms volume mute around the seek to A.
+ * best-effort ~5 ms volume mute around the seek to A. Arming the loop while the
+ * playhead is outside [A, B) aligns it to A immediately (see [alignToAOnArm]).
  *
  * Pure logic — unit-testable with a fake clock; no Compose, no Media3.
  */
@@ -105,6 +106,24 @@ class LoopController(
     fun setLoopEnabled(enabled: Boolean) {
         if (!enabled) restoreJob?.cancel()
         _state.update { it.copy(loopEnabled = enabled) }
+        if (enabled) alignToAOnArm()
+    }
+
+    /**
+     * Arming while the playhead is outside [A, B) jumps straight to A so repetition starts
+     * immediately — whether armed before A or already past B (which used to play out the
+     * rest of the track before a catch-up seam). Emits no [SeamEvent]: an arm-time seek is
+     * not a loop-boundary crossing, and seam-deviation stats must only measure real B→A
+     * passes.
+     */
+    private fun alignToAOnArm() {
+        val current = player ?: return
+        val s = _state.value
+        if (s.positionB <= s.positionA) return
+        val pos = current.currentPositionMs
+        if (pos < s.positionA || pos >= s.positionB) {
+            seekToA(current)
+        }
     }
 
     fun clear() {
