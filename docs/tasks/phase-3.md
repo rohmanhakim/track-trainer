@@ -203,18 +203,36 @@ soak, seam audition at 0.5×/1×) are folded into this session per decision D2.
   unit-testable without a player.
 
 ### Acceptance
-- [ ] `assembleDebug` + `testDebugUnitTest` green, zero new warnings (51 tests,
-      incl. new `FrameStepTest`).
-- [ ] `lintDebug` green (see notes).
-- [ ] On-device: app installs + launches on Redmi `94d32c7b7d78` without crashes; Track DB ready (7 tracks).
+- [x] `assembleDebug` + `testDebugUnitTest` green, zero new warnings (56 tests,
+      incl. `FrameStepTest` + `PlaybackIntentTest`).
+- [x] `lintDebug` green (0 errors; 12 pre-existing warnings, none in changed files).
+- [x] On-device: app installs + launches on Redmi `94d32c7b7d78` without crashes; Track DB ready (7 tracks).
 - [x] On-device (manual taps): A and B settable in one tap each, visible as markers; loop toggle starts/stops repetition (P3-1).
 - [x] On-device (manual taps): named loop points selectable/renamable/deletable; persists with the track (feeds P3-4 restore).
 - [x] On-device (manual taps): paused, frame-step ±1 advances ~1 frame on 30/60 fps content (P3-5).
-- [ ] Folded T02 checks (manual taps): seam deviation ≤100 ms via `loop seam:` logcat, 10-min soak, seam audition at 0.5×/1× (D2).
+- [x] Folded T02 checks: seam deviation ≤100 ms via `loop seam:` logcat (steady-state
+      overruns 0–72 ms over 130 seams), 10-min soak (10.3 min contiguous, gaps
+      4.7–5.0 s, no crash), seam audition at 0.5×/1× clean by ear (owner,
+      headphones) (D2).
 
 ### Remaining Issues
-- [ ] When setting point B then loop is active, when the playabck reaches the point B, in a fraction of second the `Pause` button will chaneg into `Play` then go back to `Pause` again when the playback goes back to point A. the experience making the button to be blinking when the playback transitioning from point B to A
-- [ ] 0 seam events even though it's looping — so the loop seek works but the seam events aren't being emitted/logged (a logging bug, separate from the loop itself)
+- [x] When setting point B then loop is active, when the playabck reaches the point B, in a fraction of second the `Pause` button will chaneg into `Play` then go back to `Pause` again when the playback goes back to point A. the experience making the button to be blinking when the playback transitioning from point B to A
+      — **RESOLVED (2026-11-01).** Root cause: the button label derived from
+      `player.isPlaying`, which transiently dips to false whenever the player buffers —
+      including every loop-seam seek to A. Fix: transport button, `keepScreenOn`,
+      `togglePlayPause`, and the frame-step paused-gate now derive from
+      `isPlayingIntent` (`playWhenReady && state != STATE_ENDED`; pure helper in
+      `player/PlaybackIntent.kt`, unit-tested in `PlaybackIntentTest`). Verified on
+      Redmi: 12 UI snapshots across ~11 seams all showed Pause (no blink); owner
+      confirmed visually.
+- [x] 0 seam events even though it's looping — so the loop seek works but the seam events aren't being emitted/logged (a logging bug, separate from the loop itself)
+      — **RESOLVED (2026-11-01).** Root cause: `MutableSharedFlow()` with zero
+      replay/buffer — `tryEmit` silently drops whenever the collector isn't ready at
+      that instant (return value was ignored). Fix: `extraBufferCapacity = 16` +
+      suspending-emit fallback in `LoopController`. Regression tests
+      `seamEventIsEmittedForEachSeam` + `seamEventsAreNotDroppedWhileCollectorIsBusy`
+      fail against the old code, pass with the fix. Verified on Redmi: `loop seam:`
+      logcat flows (130 seams captured during the soak).
 
 
 ### Session notes
@@ -232,6 +250,31 @@ soak, seam audition at 0.5×/1×) are folded into this session per decision D2.
 - **T03 UX fix (compressed UI):** portrait control surface overflowed its 60% share, clipping the bottom placeholder to an un-tappable sliver. Fixed by (1) removing the Phase 4–5 `Tap tempo` / `Count-in / metronome` placeholders from `ControlSurface` (they ate ~112 dp), (2) wrapping `ControlSurface` + `LoopPointsList` in `verticalScroll`, (3) `LoopPointsList` height `200.dp` → `heightIn(max = 120.dp)` + inner scroll, (4) shorter frame-step labels (`◀ −1 frame` / `+1 frame ▶`), (5) clear buttons → `Clear` text with a ≥48 dp target, and (6) `VIDEO_PORTRAIT_HEIGHT_FRACTION` `0.40` → `0.36` so Save loop… stays above the nav bar even with A/B set. Verified on Redmi: all controls (Set A/B, Clear, Loop toggle, Step ±1 frame, Save loop…) fully visible + tappable with A/B set.
 - **T03 UX fixes round 2 (3 reported issues, all verified on Redmi):** (1) loop group was one wide `SpaceBetween` row that squeezed `Set B` un-tappable when A+B set → restructured `LoopControls` into stacked weighted rows (Set A|Set B, range|Loop, Clear A|Clear B, frame-step) so each button keeps a full cell. (2) could not create a 2nd loop — `saveLoopPoint` updated the active point and the button was stuck on "Update loop" → `saveLoopPoint` now always inserts a new point and the button is the constant "Save loop…" (multiple loops confirmed: Loop 1 + Loop 2 created). (3) Delete popup showed "Back"/"Add" → now "Delete"/"Cancel" (plus rename dialog "Save"/"Cancel"). Verified via UI-hierarchy bounds + dialog dump on the Redmi.
 - Remaining on-device boxes (named-loop rename/delete persistence across reopen, P3-5 frame-step on 30/60 fps, folded T02 seam/soak checks) need manual UI taps — left for owner verification on the Redmi; they'll be re-groomed/closed in T04/T05.
+- **2026-11-01: T03 acceptance close-out + 2 bug fixes (both verified on Redmi `94d32c7b7d78`).**
+  - Seam-event drop fix (`loop/LoopController.kt`): zero-capacity `MutableSharedFlow`
+    + `tryEmit` silently dropped every seam event → buffered `extraBufferCapacity = 16`
+    + suspending-emit fallback. 2 regression tests added (`LoopControllerTest` 8/8);
+    both fail against the old code (reproduced) and pass with the fix.
+  - Blink fix (`player/PlaybackIntent.kt` + `PlayerViewModel`/`PlayerScreen`/
+    `StudyScreen`): transport button / `keepScreenOn` / `togglePlayPause` / frame-step
+    paused-gate derive from `isPlayingIntent` (`playWhenReady && state != STATE_ENDED`);
+    `PlaybackIntentTest` 3 tests. Side-effect fix: tapping Pause during the seam's
+    transient buffering now pauses (used to no-op/keep playing).
+  - P3-2 deviation measured via `loop seam:` logcat: steady-state overruns 0–72 ms
+    (target ≤100 ms), seam cadence 4.7–5.0 s, 130 seams over 10.3 min contiguous
+    (09:41–09:51) — 10-min soak passed, zero interruptions, no crash.
+  - P3-3 audition (owner, headphones): clean at 1× and 0.5× — no pop/click at the seam;
+    the ~5 ms mute seam mask holds; no Phase 5 fade trigger needed.
+  - Gates: `assembleDebug` + `testDebugUnitTest` (56 tests) + `lintDebug` green,
+    zero new warnings (12 lint warnings are pre-existing: dependency-version notices,
+    unused strings, Phase-1 `DefaultLocale`/`OldTargetApi`).
+  - Grooming note (not implemented — no scope growth): arming the loop while playback
+    is already past B seeks to A on the first poll (one catch-up seam; observed 10.8 s
+    overrun on arm). Consider seek-to-A-on-arm → Phase 4+ grooming.
+  - Verification tooling note: `adb logcat` without `-T` replays the ring buffer first;
+    the buffer only holds ~7 min of TrackTrainer output, so long soaks need a
+    persistent capture (`adb logcat -s TrackTrainer > file`).
+
 ## T04 — Preset persistence & restore
 
 **Status:** not-started · **Depends on:** T01, T03 · **Stories:** P3-4
