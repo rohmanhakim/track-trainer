@@ -48,8 +48,11 @@ io.github.rohmanhakim.tracktrainer
 └── ui/
     ├── study/      # portrait control surface
     ├── focus/      # landscape HUD
+    ├── settings/   # count-in | metronome settings screen (3rd nav destination)
     └── shared/     # shared composables (transport bar, tap pad, overlay)
 ```
+
+Phase 4 notes: `countin/` owns the boundary-anchored count scheduler (final tick = resume at A/00:00, click spacing `(60000/bpm) ÷ speed` from `Preset.bpm`); `ui/settings/` is rendered as a full-screen layer inside the player branch of `MainActivity`'s manual nav so the player never leaves composition. Phase 5 metronome grid spec: beats are **track-anchored** to a per-track phase offset against the same A/00:00 anchor (adjustable ±ms via the phase-nudge control), not free-running.
 
 ## 3. Core pipelines
 

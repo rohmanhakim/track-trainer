@@ -103,6 +103,7 @@ Layout switches by orientation via the same composables (state shared, arrangeme
 ```
 - Video pinned top ~40 %, control surface below.
 - TAP TEMPO pad is the hero control: big, unmissable, reachable with a picking-hand thumb.
+- **`count-in | metronome` row = settings entry (Phase 4).** The row is a live summary (count-in on/off + current BPM) and opens a dedicated full-screen settings destination layered over the player — back returns with position/speed/loop state unchanged. Phase 4 populates it with count-in controls (clicks/bars, N, subdivision, click sound/volume), BPM slider + manual input, and a latency nudge; tap tempo and metronome sections arrive as disabled placeholders in P4 and fill in during Phase 5. Landscape HUD gets its own entry button when the focus layout lands (deferred).
 
 #### Landscape — "focus session"
 ```

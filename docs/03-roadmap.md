@@ -121,7 +121,10 @@ execution status; this section remains the scope authority.
 - Standalone-`AudioTrack` click generator with absolute-time scheduling (shared with Phase 5's click synthesis code).
 - Count-in controller: counts before 00:00 (player start) and before A (each loop iteration), player frozen during count.
 - Animated overlay: punch-in numerals, dimmed frozen frame, beat-progress ring; visual schedule synced to heard click (output-latency compensated).
-- Config: count length (clicks or bars), subdivision clicks, on/off.
+- Config: count length (clicks or bars), subdivision clicks, on/off — via a **dedicated track settings screen** (third destination in `MainActivity`'s manual nav, opened from a `count-in | metronome` entry row on the study screen; full-screen layer over the player, back returns with player state intact — owner decision, 2026-11-10).
+- **Track settings screen contents (P4):** count-in on/off, clicks/bars + N stepper, subdivision, click sound/volume, BPM slider + manual entry, latency nudge (±30 ms, DataStore). Tap tempo and metronome sections shown as disabled placeholders until Phase 5.
+- **One tempo source:** `Preset.bpm` (default 120) drives count-in click spacing `(60000/bpm) ÷ speed` (real-time, speed-scaled); input via slider/manual in P4, tap tempo joins in P5. Boundary-anchored: final tick = resume at A / 00:00. Bars mode = 4/4.
+- **Schema:** `Preset` gains `countInEnabled` (default on) + `countInSubdivision` (default off) → Room migration 5→6.
 - **Count-in mode = fixed clicks by default (4).** A second mode that follows the tapped tempo/BPM grid is a later addition — both modes stay available; fixed is often enough (owner decision).
 
 **Stories & acceptance criteria**
