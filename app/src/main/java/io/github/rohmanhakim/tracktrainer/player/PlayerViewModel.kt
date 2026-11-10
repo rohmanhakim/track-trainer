@@ -12,6 +12,7 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -430,10 +431,17 @@ class PlayerViewModel @Inject constructor(
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
+        // http(s) items are served through the disk cache (read-through: streams while
+        // writing). LOCAL SAF references bypass the cache entirely: the cache's upstream
+        // is HTTP-only (content:// fails with "unknown protocol: content") and local
+        // bytes must never be copied into the cache (cacheKeyFor → null invariant).
+        val mediaSourceFactory = if (track.sourceType == SourceType.LOCAL) {
+            DefaultMediaSourceFactory(DefaultDataSource.Factory(context))
+        } else {
+            DefaultMediaSourceFactory(cacheDataSourceFactory)
+        }
         val player = ExoPlayer.Builder(context)
-            // http(s) items are served through the disk cache (read-through: streams while
-            // writing). Local SAF references play untouched — P1 regression guard.
-            .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
+            .setMediaSourceFactory(mediaSourceFactory)
             // Seek-to-A (loop seam) and bar seeks land on sync frames (P3-2).
             .setSeekParameters(SeekParameters.CLOSEST_SYNC)
             // Take audio focus so a call or another app pauses us instead of two
@@ -445,8 +453,8 @@ class PlayerViewModel @Inject constructor(
         // Bind the loop engine to this player instance; A/B state lives on the
         // controller and survives player rebuilds (rotation).
         loopController.attach(ExoLoopPlayer(player))
-        // http(s) items are served through the disk cache (read-through: streams while
-        // writing). Local SAF references play untouched — P1 regression guard.
+        // Null for LOCAL — the same no-cache invariant the media-source factory above
+        // enforces; videoId+itag (YouTube) or normalized-URL-hash (DIRECT) otherwise.
         currentCacheKey = cacheKeyFor(track)
         // YouTube: serve the resolved progressive streamUrl through the cache (never the
         // watch URL — R6). LOCAL/DIRECT play sourceRef untouched (P1/P2-8 regression guard).
