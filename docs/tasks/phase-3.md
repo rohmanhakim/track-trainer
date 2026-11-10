@@ -25,7 +25,7 @@ and per-session status/notes.
 | T02 | Loop engine: position-poll loop controller, `CLOSEST_SYNC` seek to A, loop-until-off | done | P3-2, P3-3 |
 | T03 | Loop UI + frame step: A/B markers, loop toggle, named loop points list, frame step ±1 | done | P3-1, P3-5 |
 | T04 | Preset persistence & restore: debounced auto-save, restore on open | done | P3-4 |
-| T05 | Phase 3 review & exit sweep | not-started | all P3-x |
+| T05 | Phase 3 review & exit sweep | done | all P3-x |
 
 **Order:** T01 → T02 → T03 → T04 → T05 (Kanban WIP limit: one feature at a
 time, device-verified before moving on). The 10-min continuous-loop soak in
@@ -409,7 +409,7 @@ Owner interactive matrix (Redmi) — all passed:
 
 ## T05 — Phase 3 review & exit sweep
 
-**Status:** not-started · **Depends on:** T01–T04 · **Stories:** all P3-x
+**Status:** done · **Depends on:** T01–T04 · **Stories:** all P3-x
 
 ### Goal
 Verify the whole Phase 3 end-to-end on-device, confirm no Phase 1–2
@@ -438,12 +438,72 @@ Done.
   T02 couldn't wire it cleanly).
 
 ### Acceptance
-- [ ] All P3-1…P3-5 acceptance boxes checked on device.
-- [ ] Definition of Done (§10) sweep complete → **Phase 3 exit**.
-- [ ] Phase 1–2 regressions spot-checked, none found (or filed).
-- [ ] Roadmap + risk register updated; leftovers noted for Phase 4.
-- [ ] `assembleDebug` + `testDebugUnitTest` + `lintDebug` all green, zero new
+- [x] All P3-1…P3-5 acceptance boxes checked on device.
+- [x] Definition of Done (§10) sweep complete → **Phase 3 exit**.
+- [x] Phase 1–2 regressions spot-checked — 1 found (local playback, latent Phase 2
+      bug) → fixed `06ef560`; none outstanding.
+- [x] Roadmap + risk register updated; leftovers noted for Phase 4.
+- [x] `assembleDebug` + `testDebugUnitTest` + `lintDebug` all green, zero new
       warnings.
 
 ### Session notes
-(empty — fill during session)
+
+**2026-11-10: T05 exit sweep — Phase 3 complete.**
+
+Prep (before the device matrix):
+- T04 closed (owner interactive matrix all `[x]`); lint fix `StudyScreen.kt`
+  `renameId`/`deleteId` → `mutableLongStateOf` (the 2 `AutoboxingStateCreation`
+  hits flagged in T03). Committed `c50eb38`.
+- Gates: `assembleDebug` + `testDebugUnitTest` (70 tests, 0 failures) +
+  `lintDebug` green. Lint tally **12** (was 14) — all pre-existing.
+
+**Regression found & fixed (the sweep earned its keep):**
+- Local playback broken since Phase 2 `c406cde` (2026-10-29):
+  `DefaultMediaSourceFactory(cacheDataSourceFactory)` fed `content://` to the
+  HTTP-only `DefaultHttpDataSource` upstream → `MalformedURLException: unknown
+  protocol: content` → "Can't play this file". Phase 2's local UI spot-check was
+  deferred (`[-]`, phase-2.md T02) and never closed. **Process lesson: a
+  "UI spot-check deferred" box must close in the same phase's exit sweep.**
+- Fixed `06ef560`: LOCAL uses `DefaultDataSource` and bypasses the cache
+  entirely (upholds `cacheKeyFor → null` — local bytes must never be cached;
+  merely routing `content://` through `CacheDataSource` would have copied the
+  file into the 50 MB cache). Verified on device: local clip plays; AV1 1080p60
+  software decode on the Redmi is fine (`dropped=8` / 796 rendered).
+
+Device matrix (Redmi `94d32c7b7d78`), all verified:
+- **P3-2 soak:** 10 min 38 s continuous looping (44 seams, 11:28–11:39),
+  overruns 0–49 ms (avg 20.8) — every seam ≤100 ms; zero errors, no crashes. ✅
+- **P3-3:** owner, headphones: seam clean at 1× (during soak) and 0.5×. ✅
+- **P3-1:** Set A/B one tap each + visible markers + "Save loop…" named point
+  persisted (Room rows: `Loop 18` on track 1; 4 named lesson loops on track 3). ✅
+- **P3-4:** reopen restores speed + armed loop point (preset) — spot-recheck on
+  top of T04's matrix. ✅
+- **P3-5:** 244 frame-step taps logged — 189 × `frameMs=16` (59.94 fps clip) +
+  55 × `frameMs=33` (30 fps); each tap exactly one frame. ✅
+- **Phase 1–2 regressions:** local ✓ (post-fix), YouTube ✓ (`cache hit — zero
+  extraction`, keys `yt|<id>|18`), direct URL ✓ (muxed itag-18 URL added & played
+  through `CacheDataSource`), cache replay ✓, speed chips ✓, rotation ✓,
+  keep-screen-on ✓ (screen held through the 10-min soak), missing-file ✓ ("⚠️
+  File missing" + Re-link button on the library row per P1-1a; renaming back
+  restored playback). The player dialog shows a generic error for dead local refs
+  by design — grooming note below.
+- Phase exit statement verified in real practice: owner set real lesson loops on
+  the Smiths tutorial track ("Intro Lesson" / "Intro 2 Lesson" / "Intro Full").
+
+Tooling notes:
+- adb daemon restart forces the device re-auth dialog (cost ~10 min once).
+- DB inspection: `cat db + wal` concat **tears the WAL** and can hide a committed
+  row — pull `track-trainer.db` and `-wal` as separate files instead.
+- yt-dlp muxed direct-URL recipe (recorded in R15): needs the bgutil POT server
+  running (`/home/arif/Projects/bgutil-ytdlp-pot-provider/server` → `node
+  build/main.js`, :4416), `--js-runtimes node`, and
+  `--extractor-args 'youtube:player_client=android'` (the default visionos client
+  offers no muxed formats) → `-g -f 18`.
+- The direct-URL/local test content lives on SD volume `6163-3163` (not `/sdcard`).
+
+Leftovers → Phase 4/5 grooming (no scope added here):
+- Player error dialog could surface the Re-link action for dead LOCAL refs
+  (today: generic "Can't play this file"; Re-link lives on the library row).
+- Seam fade processor stays deferred to Phase 5 — the ~5 ms seam mute mask passed
+  P3-3 on headphones at 0.5× and 1×; revisit only if G2 touches seams.
+- SpikeActivity back-button crash (debug-only, pre-existing since Phase 2).

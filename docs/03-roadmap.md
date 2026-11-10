@@ -91,6 +91,10 @@ execution status; this section remains the scope authority.
 
 **Goal:** the core rehearsal mechanic.
 
+**Session-level task breakdown:** [`docs/tasks/phase-3.md`](tasks/phase-3.md) —
+5 focused sessions (T01–T05), each with scope + acceptance + notes. That file tracks
+execution status; this section remains the scope authority.
+
 **Deliverables**
 - A/B markers on the seek bar; set/clear/move; loop toggle.
 - Position-polling loop controller (30–50 ms) with `CLOSEST_SYNC` seek to A.
@@ -103,11 +107,11 @@ execution status; this section remains the scope authority.
 
 | ID | Story | Acceptance criteria |
 |---|---|---|
-| P3-1 | As the owner I mark A and B | Markers visible, set in one tap each, persist with the track |
-| P3-2 | As the owner the passage repeats | Loop restarts at A when reaching B; deviation ≤100 ms; survives 10 min continuous looping |
-| P3-3 | As the owner the seam is clean | No audible pop/click at loop boundary at 0.5× and 1× |
-| P3-4 | As the owner I recall my settings | Reopening a track restores speed + loop points (preset) |
-| P3-5 | As the owner I step frames | Paused, each tap advances exactly ~1 frame; usable on 30/60 fps content |
+| P3-1 | As the owner I mark A and B | ✅ Markers visible, set in one tap each, persist with the track |
+| P3-2 | As the owner the passage repeats | ✅ Loop restarts at A when reaching B; deviation ≤100 ms; survives 10 min continuous looping |
+| P3-3 | As the owner the seam is clean | ✅ No audible pop/click at loop boundary at 0.5× and 1× |
+| P3-4 | As the owner I recall my settings | ✅ Reopening a track restores speed + loop points (preset) |
+| P3-5 | As the owner I step frames | ✅ Paused, each tap advances exactly ~1 frame; usable on 30/60 fps content |
 
 ## 6. Phase 4 — Count-in
 

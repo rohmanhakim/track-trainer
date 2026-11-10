@@ -26,7 +26,13 @@ speed control, A-B loop, animated count-in, tap-tempo metronome, volume boost.
   verified (Redmi API 35). `docs/tasks/phase-2.md` — T01–T06 all `done`.
   - D2 validated: yt-dlp primary (`io.github.junkfood02.youtubedl-android:library:0.18.1`), gate G1 passed.
   - P2-1…P2-8 all verified on device: paste link → play → offline replay, stable cache keys (`videoId` + `itag`), LRU eviction under 50 MB debug cap.
-- **Next:** `docs/03-roadmap.md` Phase 3 — A-B Loop + Presets. Groom `docs/tasks/phase-3.md` before starting.
+- **Phase 3 complete** (exited 2026-11-10): A-B loop + named loop points + presets
+  (Room schema v5, migrations 3→4 / 4→5), frame step ±1. P3-1…P3-5 all verified
+  on-device (Redmi API 35) incl. the 10-min seam soak (overruns 0–49 ms) and
+  30/60 fps frame step. Exit sweep found & fixed a Phase-2-era regression: LOCAL
+  playback had been routed through the HTTP-only cache pipeline (`06ef560`).
+  `docs/tasks/phase-3.md` — T01–T05 all `done`.
+- **Next:** `docs/03-roadmap.md` Phase 4 — Count-in. Groom `docs/tasks/phase-4.md` before starting.
 - Then follow `docs/03-roadmap.md`: one phase at a time, stories + acceptance
   criteria, Definition of Done applies (§10).
 
