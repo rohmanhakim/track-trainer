@@ -85,13 +85,14 @@ takePersistableUriPermission   │                           │
 
 - Speed: `PlaybackParameters(speed = 0.25f..2f)` — Media3 time-stretches with pitch preserved (verify on device; Sonic-based processing can artifact <0.5×).
 - Transpose: `PlaybackParameters.pitch` (±12 semitones) — independent of speed.
-- Accurate A/B seeks: `SeekParameters.CLOSEST_SYNC` for seeks to A.
+- Seeks to A use `SeekParameters.CLOSEST_SYNC` (restart lands on a sync frame); the A label self-corrects to the landed position when that seek lands (§3.3).
 - Frame step: pause + `seekTo(current ± frameDurationUs)`; container frame duration where known, else ~33 ms fallback.
 
 ### 3.3 A-B loop (F5)
 
 - ExoPlayer has **no built-in loop**. Coroutine polls `player.currentPosition` every ~30–50 ms; when ≥ B → `seekTo(A)`.
 - Expected accuracy ±50–100 ms (acceptable); seam masked with ~5 ms fade to avoid pops.
+- A self-corrects to the actual restart position on the first seek-to-A landing (label == saved row == playback); B is a comparison threshold and is honored exactly (only the poll's 0–~50 ms overrun applies). Owner decision 2026-11-10: keep `CLOSEST_SYNC`; a frame-exact (`EXACT`) mode is iceboxed (01-product-overview §4.2).
 - Loop points stored per track; multiple named points; repeat-count support.
 
 ### 3.4 Count-in (F6) — hybrid design

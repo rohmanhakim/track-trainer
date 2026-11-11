@@ -134,6 +134,8 @@ class PlayerViewModel @Inject constructor(
     private val presetAutoSaver = PresetAutoSaver(viewModelScope) { presetRepository.upsert(it) }
     /** True while a preset restore is being applied — restore is not a user change. */
     private var applyingPreset = false
+    /** Last user-authored seek target until the player confirms it landed. */
+    private val pendingSeek = PendingSeek()
 
     init {
         // Log every loop seam so P3-2 deviation can be measured on-device via logcat.
@@ -232,10 +234,11 @@ class PlayerViewModel @Inject constructor(
         // must pause, not silently keep playing.
         if (isPlayingIntent(player.playWhenReady, player.playbackState)) {
             player.pause()
+            syncPositionFromPlayer(player)
         } else {
             // At STATE_ENDED playWhenReady is already true, so play() alone is a
             // no-op — restart explicitly so "Play" after the end replays from the top.
-            if (player.playbackState == Player.STATE_ENDED) player.seekTo(0L)
+            if (player.playbackState == Player.STATE_ENDED) seekTo(0L)
             player.play()
         }
     }
@@ -248,9 +251,35 @@ class PlayerViewModel @Inject constructor(
         } else {
             positionMs.coerceAtLeast(0L)
         }
-        player.seekTo(target)
+        pendingSeek.onUserSeek(target)
+        seekExactly(player, target)
         // Update the label now — the 250 ms poll would make every seek look laggy (P1-2).
         _uiState.update { it.copy(positionMs = target) }
+    }
+
+    /**
+     * `SeekParameters.EXACT` sandwiched around the player default `CLOSEST_SYNC`: bar and
+     * frame-step seeks must land exactly where the owner aimed — CLOSEST_SYNC snaps to a
+     * keyframe (seconds away on typical GOPs) and Set A/B would capture that snap instead
+     * of the timestamp on screen. Playback-thread messages are FIFO, so this seek resolves
+     * under EXACT before CLOSEST_SYNC is restored and the loop seam's seek-to-A stays a
+     * fast sync-frame seek (P3-2).
+     */
+    private fun seekExactly(player: ExoPlayer, targetMs: Long) {
+        player.setSeekParameters(SeekParameters.EXACT)
+        player.seekTo(targetMs)
+        player.setSeekParameters(SeekParameters.CLOSEST_SYNC)
+    }
+
+    /**
+     * Pause freezes the playhead — re-sync the label now so Set A/B don't capture the
+     * up-to-250 ms-stale poll value. Skipped while a user seek is in flight: then the
+     * authored target owns the label, not a pre-seek `currentPosition` read.
+     */
+    private fun syncPositionFromPlayer(player: ExoPlayer) {
+        if (!pendingSeek.inFlight) {
+            _uiState.update { it.copy(positionMs = player.currentPosition) }
+        }
     }
 
     /**
@@ -272,18 +301,55 @@ class PlayerViewModel @Inject constructor(
      * named point, so preset restore must not resurrect its stale bounds.
      */
     fun setLoopA() {
-        val player = _player.value ?: return
+        if (_player.value == null) return
         loopController.setActiveLoopPoint(null)
-        loopController.setA(player.currentPosition)
+        loopController.setA(playheadMs())
         schedulePresetSave()
     }
 
     /** Sets loop point B to the current playhead position (tap to set / move). See [setLoopA]. */
     fun setLoopB() {
-        val player = _player.value ?: return
+        if (_player.value == null) return
         loopController.setActiveLoopPoint(null)
-        loopController.setB(player.currentPosition)
+        loopController.setB(playheadMs())
         schedulePresetSave()
+    }
+
+    /**
+     * The position Set A/B captures: the displayed playhead, never a fresh
+     * `player.currentPosition` read — that still returns the pre-seek position while a
+     * seek is in flight, which is how a precise step/scrub ended up capturing a point
+     * away from the timestamp on screen (see [PendingSeek]).
+     */
+    private fun playheadMs(): Long = _uiState.value.positionMs
+
+    /**
+     * A loop seek-to-A landed on its `CLOSEST_SYNC` keyframe — from now on that's where
+     * playback actually restarts, so correct A (and its label) to it and persist to the
+     * active named point: label == saved row == playback, converging after the first
+     * seek-to-A. At most one correction per session — a corrected A sits on the sync
+     * grid, so later seek-to-A land exactly on it. Skips no-op landings and ones that
+     * would invalidate the loop (A ≥ B).
+     */
+    private fun correctLoopA(landedMs: Long) {
+        val s = loopController.state.value
+        if (s.positionA < 0L || s.positionA == landedMs) return
+        val b = s.positionB
+        if (landedMs < 0L || (b >= 0L && landedMs >= b)) {
+            Log.w(TAG, "loop A correction skipped: landed=$landedMs outside valid range (B=$b)")
+            return
+        }
+        Log.d(TAG, "loop A corrected: ${s.positionA} → $landedMs (CLOSEST_SYNC restart point)")
+        loopController.setA(landedMs)
+        // The playhead is where the seek just landed — sync the label immediately
+        // rather than waiting for the next position-poll tick.
+        _uiState.update { it.copy(positionMs = landedMs) }
+        val id = s.activeLoopPointId
+        if (id != null) {
+            viewModelScope.launch {
+                loopRepository.getById(id)?.let { loopRepository.update(it.copy(positionA = landedMs)) }
+            }
+        }
     }
 
     fun clearLoopA() {
@@ -385,9 +451,9 @@ class PlayerViewModel @Inject constructor(
     }
 
     /**
-     * Steps ±1 frame while paused (P3-5, F10). Uses `SeekParameters.EXACT` so a single
-     * frame isn't snapped to the nearest sync frame, then restores `CLOSEST_SYNC` used by
-     * the loop seam seeks. Falls back to ~33 ms (30 fps) when frame rate is unknown (R14).
+     * Steps ±1 frame while paused (P3-5, F10) via [seekExactly] so a single frame isn't
+     * snapped to the nearest sync frame. Falls back to ~33 ms (30 fps) when frame rate is
+     * unknown (R14).
      */
     fun frameStep(forward: Boolean) {
         val player = _player.value ?: return
@@ -395,21 +461,26 @@ class PlayerViewModel @Inject constructor(
         // buffering — a step tap in that window must not sneak a seek into a live loop.
         if (isPlayingIntent(player.playWhenReady, player.playbackState)) return
         val durationMs = _uiState.value.durationMs
-        val current = player.currentPosition
+        // The displayed playhead, not player.currentPosition: while the previous step's
+        // seek is in flight the player still reports the pre-seek position, so rapid taps
+        // would all step from a stale base and stall/drift the stepping.
+        val current = _uiState.value.positionMs
         val frameRate = player.videoFormat?.frameRate ?: 0f
         val frameMs = frameDurationMs(frameRate)
         var target = if (forward) current + frameMs else current - frameMs
         target = if (durationMs > 0L) target.coerceIn(0L, durationMs) else target.coerceAtLeast(0L)
-        player.setSeekParameters(SeekParameters.EXACT)
-        player.seekTo(target)
-        player.setSeekParameters(SeekParameters.CLOSEST_SYNC)
+        pendingSeek.onUserSeek(target)
+        seekExactly(player, target)
         _uiState.update { it.copy(positionMs = target) }
         Log.d(TAG, "frame step: forward=$forward from=$current to=$target frameMs=$frameMs")
     }
 
     /** Pause without tearing down — used when the app leaves the foreground. */
     fun pause() {
-        _player.value?.pause()
+        _player.value?.let { player ->
+            player.pause()
+            syncPositionFromPlayer(player)
+        }
     }
 
     /** Back-navigation teardown: stop audio and free the player; a later open builds fresh. */
@@ -427,6 +498,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     private fun startPlayer(track: Track) {
+        pendingSeek.reset()
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -442,7 +514,8 @@ class PlayerViewModel @Inject constructor(
         }
         val player = ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSourceFactory)
-            // Seek-to-A (loop seam) and bar seeks land on sync frames (P3-2).
+            // Sync-frame seek-to-A for the loop seam (P3-2); user-authored seeks
+            // (bar / frame step) override this with EXACT via seekExactly().
             .setSeekParameters(SeekParameters.CLOSEST_SYNC)
             // Take audio focus so a call or another app pauses us instead of two
             // sounds fighting; no MediaSession until Phase 7, this is the cheap half.
@@ -451,8 +524,10 @@ class PlayerViewModel @Inject constructor(
         // Apply the session speed to the fresh player (default 1× if never changed).
         player.setPlaybackParameters(PlaybackParameters(currentSpeed))
         // Bind the loop engine to this player instance; A/B state lives on the
-        // controller and survives player rebuilds (rotation).
-        loopController.attach(ExoLoopPlayer(player))
+        // controller and survives player rebuilds (rotation). Loop seeks land via
+        // CLOSEST_SYNC — flagged so correctLoopA can fix the label to the real
+        // restart point when the landing is known.
+        loopController.attach(ExoLoopPlayer(player) { pendingSeek.onLoopSeek() })
         // Null for LOCAL — the same no-cache invariant the media-source factory above
         // enforces; videoId+itag (YouTube) or normalized-URL-hash (DIRECT) otherwise.
         currentCacheKey = cacheKeyFor(track)
@@ -475,6 +550,23 @@ class PlayerViewModel @Inject constructor(
                     val cacheKey = currentCacheKey
                     if (trackId != null && cacheKey != null) {
                         viewModelScope.launch { bookkeeper.markPlayed(trackId, cacheKey) }
+                    }
+                }
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int,
+            ) {
+                // Once the playback thread has processed a seek its position is
+                // trustworthy again: user seeks hand the label back to the position
+                // poll (a superseded landing keeps the newer target pending), while
+                // loop seek-to-A landings correct A to the real restart point.
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                    val settled = pendingSeek.onSeekSettled(newPosition.positionMs)
+                    if (settled != null && settled.wasLoopSeek) {
+                        correctLoopA(settled.landedMs)
                     }
                 }
             }
@@ -577,7 +669,13 @@ class PlayerViewModel @Inject constructor(
                 val duration = player.duration // C.TIME_UNSET (negative) until known
                 _uiState.update {
                     it.copy(
-                        positionMs = player.currentPosition,
+                        // While a user seek is in flight the authored target owns the
+                        // label — a mid-seek currentPosition read is the pre-seek value.
+                        positionMs = if (pendingSeek.inFlight) {
+                            it.positionMs
+                        } else {
+                            player.currentPosition
+                        },
                         durationMs = if (duration > 0L) duration else it.durationMs,
                     )
                 }
@@ -633,6 +731,7 @@ class PlayerViewModel @Inject constructor(
     private fun releaseInternal() {
         positionJob?.cancel()
         positionJob = null
+        pendingSeek.reset()
         loopController.detach()
         _player.value?.let { player -> playerListener?.let(player::removeListener); player.release() }
         playerListener = null

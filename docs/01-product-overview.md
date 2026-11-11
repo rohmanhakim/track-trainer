@@ -52,6 +52,7 @@ A **practice companion for guitarists** built around video "play-along" lessons 
 - Karaoke / center-channel cancellation (needs audio extraction at cache time)
 - Waveform seek bar + tap-grid visualization
 - Beat-snapped loop points (snap A/B to detected beat)
+- Loop seek precision option: keyframe (`CLOSEST_SYNC`, current — A labels self-correct to the real restart point) ↔ frame-exact (`EXACT` seam seeks + seam mute held until the seek lands; restores frame-step-exact A setting) — owner decision 2026-11-10 to keep `CLOSEST_SYNC` for now
 - Visual beat flash during playback (free once count-in clock exists — may land in V1 if trivial)
 - Practice statistics / streaks, export-import presets, audio-only screen-off mode, YouTube playlists, in-app search
 

@@ -507,3 +507,56 @@ Leftovers → Phase 4/5 grooming (no scope added here):
 - Seam fade processor stays deferred to Phase 5 — the ~5 ms seam mute mask passed
   P3-3 on headphones at 0.5× and 1×; revisit only if G2 touches seams.
 - SpikeActivity back-button crash (debug-only, pre-existing since Phase 2).
+
+### Post-exit bug fix — Set A/B point capture (2026-11-10)
+
+Owner report: scrub the seek bar / frame-step to a timestamp, then tap
+`Set A`/`Set B` — the captured point is sometimes seconds ahead of or behind the
+head position shown. Two causes, both in `PlayerViewModel`:
+
+1. **Bar seeks were keyframe-snapped.** The player was built with
+   `SeekParameters.CLOSEST_SYNC` and that applied to *user scrub* seeks too, so
+   the head landed on the nearest sync frame (seconds off on typical GOPs); only
+   frame step forced `EXACT`. Fix: `seekExactly()` sandwiches `EXACT` around
+   every user-authored seek (bar + frame step) and restores `CLOSEST_SYNC` for
+   the loop seam — P3-2 seam behavior unchanged.
+2. **Capture read a stale position.** `setLoopA/B` and the frame-step base read
+   `player.currentPosition`, which still returns the *pre-seek* position until
+   the playback thread's update round-trips to the app thread (Media3 1.11
+   `ExoPlayerImpl.getCurrentPosition`). Fix: `PendingSeek` remembers the
+   authored target until `onPositionDiscontinuity(SEEK)` confirms it landed;
+   while pending it owns the position label (poll gated), `frameStep` steps from
+   it, and `Set A/B` capture the displayed playhead (`playheadMs()`) — never a
+   raw player read. Pause re-syncs the label (`syncPositionFromPlayer`) so the
+   ≤250 ms poll lag can't be captured either.
+
+Tests: `PendingSeekTest` (5 cases — settle-match, superseded-seek retention,
+loop-seam no-op, reset). Known caveats left as-is: seam seek-to-A still snaps to
+a sync frame near A (documented P3-2 decision — frame-exact loop starts would
+need `EXACT` on the seam + a seam-mute re-audit); loop armed + playing + scrub
+past B is still yanked to A by the seam within ~40 ms.
+
+**Adjustment 2026-11-10 (owner decision, round 2) — labels self-correct; playhead
+stays put at set time:**
+- Owner confirmed round-1 fix: Set A/B capture the displayed head exactly. The
+  round-1 idea of *moving the playhead to the sync point at set time* was dropped.
+- The remaining mismatch was label-vs-playback: A showed the intended timestamp
+  while the loop restart landed on the nearest keyframe. Fix: `correctLoopA()`
+  fires on the `CLOSEST_SYNC` seek-to-A landing (arm-align or first seam) and
+  updates A + label to the landed position — the real restart point — then
+  auto-persists to the active named `LoopPoint` row, so **label == saved row ==
+  playback** converge after the first seek-to-A (≤1 write/session: a corrected A
+  sits on the sync grid, so later landings don't move it). Skipped when the
+  landing would invalidate the loop (A ≥ B) or nothing is set.
+- B stays as set — playback runs to exactly B; only deviation is the 0–47 ms
+  boundary-poll overshoot (within the documented ±50–100 ms seam tolerance; the
+  optional 40→16 ms poll tightening was offered and not taken).
+- Frame step kept (owner decision): still frame-by-frame study navigation and the
+  precision tool for the future EXACT option.
+- Docs/code drift found: T03's D1b "Update loop" action was never implemented
+  (only Save/Rename/Delete exist) — auto-persisting corrections make the gap moot
+  for bounds; recorded here rather than built.
+- Iceboxed: "loop seek precision option (keyframe ↔ frame-exact)" →
+  `01-product-overview` §4.2.
+- Tests: `PendingSeekTest` extended to 7 cases (loop-seek settle-at-any-landing,
+  user-seek supersedes loop-seek, reset covers both).
