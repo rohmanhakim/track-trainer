@@ -21,7 +21,7 @@ and per-session status/notes.
 
 | # | Task | Status | Roadmap stories |
 |---|---|---|---|
-| T01 | Click engine: PCM synthesis + standalone `AudioTrack` absolute-time scheduler + output-latency measurement | not-started | feeds P4-1, P4-2, P4-3 |
+| T01 | Click engine: PCM synthesis + standalone `AudioTrack` absolute-time scheduler + output-latency measurement | done | feeds P4-1, P4-2, P4-3 |
 | T02 | Count-in controller: boundary-anchored state machine, triggers, freeze/resume/cancel | not-started | P4-1, P4-2 |
 | T03 | Count-in overlay: punch-in numerals, dimmed frame, ring, latency-compensated visual clock | not-started | P4-3 |
 | T04 | Count-in config: `Preset` columns, Room migration 5→6, auto-save + restore | not-started | P4-4 |
@@ -74,7 +74,7 @@ Environment reminder: every Gradle command needs
 
 ## T01 — Click engine + latency measurement
 
-**Status:** not-started · **Depends on:** — · **Stories:** feeds P4-1, P4-2, P4-3
+**Status:** done · **Depends on:** — · **Stories:** feeds P4-1, P4-2, P4-3
 
 ### Goal
 The standalone-`AudioTrack` click half of D5, living in `metronome/` (Phase 5's
@@ -122,16 +122,108 @@ in-chain processor is Phase 5 (spike S-2 / gate G2), not here.
   once per app session — decide in-session; log the result either way.
 
 ### Acceptance
-- [ ] Unit tests pass: schedule math at 0.5×/1×/1.5×; N-tick + subdivision
+- [x] Unit tests pass: schedule math at 0.5×/1×/1.5×; N-tick + subdivision
       generation; synth buffers non-silent; latency math on fake timestamps.
-- [ ] On-device: ticks at 60/120/180 BPM sound evenly spaced for ≥60 s;
+- [x] On-device: ticks at 60/120/180 BPM sound evenly spaced for ≥60 s;
       scheduled-vs-logged spacing error ≤ ±10 ms.
-- [ ] Output latency measured on the Redmi, stable across 3 runs, value logged
+- [x] Output latency measured on the Redmi, stable across 3 runs, value logged
       in session notes (feeds the R2 update in T06).
-- [ ] `assembleDebug` + `testDebugUnitTest` green, zero new warnings.
+- [x] `assembleDebug` + `testDebugUnitTest` green, zero new warnings.
 
 ### Session notes
-(empty — fill during session)
+
+**Result:** all acceptance boxes met on the Redmi (API 35) — acoustic spacing
+worst **6.0 ms** everywhere (budget ±10 ms); 32 unit tests green; both Gradle
+gates green. Owner ear-confirm still invited (speaker volume was raised from
+1/15 to 10/15 for the tests).
+
+**What shipped**
+- `metronome/`: `ClickSchedule` (media-time beat math + wall mapping),
+  `ClickSynth` (CLICK/BEEP PCM one-shots), `ClickBuffer` (pure burst layout),
+  `ClickTrack` (one MODE_STATIC AudioTrack per burst), `OutputLatency`
+  (getTimestamp probe + 50 ms fallback, session-cached).
+- Debug spike: `metronome/spike/ClickSpikeActivity` (adb-automatable: `-e
+  run/soak/probe` + bpm/ticks/speed/sound/subdivision extras) +
+  `ClickLoopback` (mic capture + pure `LoopbackAnalysis` onset
+  detector/analyzer). `RECORD_AUDIO` added to the **debug manifest only**.
+- Tests: `ClickScheduleTest` (10), `ClickSynthTest` (7), `OutputLatencyTest`
+  (4), `ClickBufferTest` (5), `LoopbackAnalysisTest` (6).
+
+**Decisions made in-session (the task's "How" invites these)**
+1. **Scheduling strategy: pre-written static buffer, not per-tick streaming.**
+   Per-tick `write()`s were implemented first and *failed on the Redmi*:
+   AudioFlinger logged `BUFFER TIMEOUT: remove track … due to underrun`
+   between ticks and the playback head never advanced. The whole burst
+   (silence gaps included) now goes into one `MODE_STATIC` buffer with a
+   single `play()` at the absolute anchor → tick spacing is sample-exact
+   (`ClickBuffer`), only `play()` is on the clock. **What Phase 5 inherits:** `ClickSynth` + `ClickSchedule` (both
+   strategy-agnostic) and this burst layout *for count-in and any
+   burst-shaped G2 fallback* (per-beat re-anchored bursts). The in-chain
+   metronome path (AudioProcessor) is unaffected; a long continuous
+   metronome stream would NOT use one static buffer — the failure mode to
+   avoid is per-tick writes with long empty gaps (the Redmi underrun case).
+2. **Latency probe cadence: once per app session** (`sessionNanos`), with
+   uncached `measure()` for the 3-run stability check.
+3. Smoke harness = debug-only spike activity, fully adb-automatable (buttons
+   remain for manual ear checks).
+
+**Device measurements (R2 data for the T06 risk-register update)**
+- Acoustic loopback (mic, `MIC` source, end-to-end DAC→air→mic) — every run
+  within the ±10 ms budget:
+  - soak 60 BPM: **17 bursts, worst 5.0 ms, all matched** (×2 runs; first run
+    had 1/17 onset-detection count flake — spacing still ≤5 ms);
+  - soak 120 BPM: **28 bursts, worst 6.0 ms, all matched**;
+  - soak 180 BPM: **35 bursts, worst 5.0 ms, all matched**;
+  - speed 0.5× / 1.5×: 4/4 each, worst 5.0 ms (wall spacing 1000 ms / ~333 ms ✓);
+  - subdivision: 7/7 ticks (half-beats audible), worst 6.0 ms; BEEP 4/4 worst
+    6.0 ms.
+- True output chain (play() → audible): **24–36 ms** across runs.
+- `OutputLatency.probe` **cannot measure on this device**: the MTK AIDL HAL
+  reports no live position (`hardware: Position{frames: -1}`), so every probe
+  returns the 50 ms fallback (50.0/50.0/50.0). **T03 should start from the
+  ~30 ms acoustic chain + user nudge, not from the probe.**
+- Head-position observation alone quantizes to the deep-buffer mix period
+  (worst 65–102 ms across soaks) and audio policy refuses fast tracks for
+  Java clients (`USAGE_MEDIA` *and* `USAGE_GAME` land on `flags 0x8`) — never
+  use head polling as the acceptance metric.
+- Speaker media volume was **1/15** (raised to 10/15 via adb for the tests).
+- Mic quirks: `AudioSource.UNPROCESSED` delivers garbage on this MTK;
+  `VOICE_RECOGNITION` works; plain `MIC` used. The playback head *leads*
+  audible time by ~150 ms (pipeline fill), so the harness records a settle
+  tail after each burst. The engine itself runs on `Dispatchers.Default` —
+  on the Main thread, cold-start frame work delayed the first burst ~800 ms.
+
+**Build environment — needs follow-up before T06**
+- KSP 2.3.12 + AGP 9.3.3 **incremental** builds intermittently drop generated
+  classes from the DEX (`Hilt_*`, `AppDatabase_Impl`) → `ClassNotFoundException`
+  at startup. Reproduce: clean build (good) → edit a file → incremental
+  `assembleDebug` → `dexdump … | grep 'Class descriptor' | grep
+  Hilt_TrackTrainerApplication` → 0.
+- Worked around here: `ksp.incremental=false` added to `gradle.properties`
+  (commented), configuration cache wiped, and **`clean` before every
+  packaging build** (all clean builds were correct). `installDebug` also
+  sometimes silently skips under the configuration cache — verify installs
+  with `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
+- A dedicated investigation (KSP upgrade / AGP flag) is preferable to living
+  with clean-only builds; logged here so T06 doesn't rediscover it.
+
+**Deviations from the task text**
+- The "scheduled-vs-logged spacing" acceptance is met via **acoustic
+  measurement** — the only ±10 ms-precise observable on this device (HAL
+  timestamps dead, fast tracks refused). In-process `BurstMeasurement` values
+  are reported as secondary, head-quantized numbers.
+
+**Carry-forward to T02 / T03 (from the strategy review)**
+- **T02 — first-tick latency budget:** a static burst must be built before
+  `play()`; measured prep ≈ 500 ms (AudioTrack init dominates), so the
+  spec's "first tick ≤ ~50 ms after trigger" needs either pre-building the
+  burst when a count is anticipated (loop armed / play-from-0) or accepting
+  and measuring the lateness. Also guard burst length: worst config
+  (4 bars @ 60 BPM @ 0.25× ≈ 64 s ≈ 6 MB static buffer) is untested —
+  validate on the Redmi or cap the range.
+- **T03 — timing sources:** visual clock = `ClickSchedule` instants + ~30 ms
+  acoustic chain + nudge; never `OutputLatency` probe (dead on this HAL) and
+  never playback-head reads (head leads audible time by ~150 ms).
 
 ## T02 — Count-in controller
 

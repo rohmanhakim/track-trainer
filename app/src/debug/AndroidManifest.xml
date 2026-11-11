@@ -1,10 +1,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.rohmanhakim.tracktrainer">
 
+    <!-- T01 acoustic loopback verification only (debug builds; spike harness). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <application>
         <!-- T01 spike harness: start via `adb am start -n io.github.rohmanhakim.tracktrainer/io.github.rohmanhakim.tracktrainer.youtube.spike.SpikeActivity`. -->
         <activity
             android:name=".youtube.spike.SpikeActivity"
+            android:exported="true" />
+        <!-- T01 click-engine smoke harness (adb-automatable: -e run/soak/probe, see class KDoc). -->
+        <activity
+            android:name=".metronome.spike.ClickSpikeActivity"
             android:exported="true" />
     </application>
 
