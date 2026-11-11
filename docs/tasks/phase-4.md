@@ -22,7 +22,7 @@ and per-session status/notes.
 | # | Task | Status | Roadmap stories |
 |---|---|---|---|
 | T01 | Click engine: PCM synthesis + standalone `AudioTrack` absolute-time scheduler + output-latency measurement | done | feeds P4-1, P4-2, P4-3 |
-| T02 | Count-in controller: boundary-anchored state machine, triggers, freeze/resume/cancel | not-started | P4-1, P4-2 |
+| T02 | Count-in controller: boundary-anchored state machine, triggers, freeze/resume/cancel | done | P4-1, P4-2 |
 | T03 | Count-in overlay: punch-in numerals, dimmed frame, ring, latency-compensated visual clock | not-started | P4-3 |
 | T04 | Count-in config: `Preset` columns, Room migration 5→6, auto-save + restore | not-started | P4-4 |
 | T05 | Track settings screen ("count-in \| metronome"): destination + count-in controls + tempo input | not-started | P4-4 |
@@ -227,7 +227,7 @@ gates green. Owner ear-confirm still invited (speaker volume was raised from
 
 ## T02 — Count-in controller
 
-**Status:** not-started · **Depends on:** T01 · **Stories:** P4-1, P4-2
+**Status:** done · **Depends on:** T01 · **Stories:** P4-1, P4-2
 
 ### Goal
 `countin/CountInController`: the pure-logic state machine that decides *when* a
@@ -283,21 +283,85 @@ with fakes like `LoopController`.
 - Rotation mid-count: `PlayerViewModel` survives; verify state re-attaches.
 
 ### Acceptance
-- [ ] Unit tests pass (trigger matrix, resume-on-final-tick, 20-seam loop,
+- [x] Unit tests pass (trigger matrix, resume-on-final-tick, 20-seam loop,
       cancel paths, mode/speed math).
-- [ ] On-device **P4-1**: from stopped at 00:00 → N clicks (default 4) →
+- [x] On-device **P4-1**: from stopped at 00:00 → N clicks (default 4) →
       playback starts on the final tick; first beat of music lands on count
       "1"+1 (roadmap wording — verify feel at 1×).
-- [ ] On-device **P4-2**: count before A on every loop, frame frozen at A the
+- [x] On-device **P4-2**: count before A on every loop, frame frozen at A the
       whole count, player resumes on the final tick; ≥20 consecutive iterations,
       no desync; cancel mid-count works (transport tap).
-- [ ] Count respects speed: tick spacing at 0.5× is double that at 1×.
-- [ ] Keep-screen-on holds through a count (screen doesn't sleep while frozen);
+- [x] Count respects speed: tick spacing at 0.5× is double that at 1×.
+- [x] Keep-screen-on holds through a count (screen doesn't sleep while frozen);
       intent/transport read correctly throughout.
-- [ ] `assembleDebug` + `testDebugUnitTest` green, zero new warnings.
+- [x] `assembleDebug` + `testDebugUnitTest` green, zero new warnings.
 
 ### Session notes
-(empty — fill during session)
+Filled 2026-11-11 — Redmi `94d32c7b7d78` (API 35), owner-operated taps, JBR builds.
+
+**Built:** `countin/` — `CountInConfig.kt` (`HardcodedCountInConfig`: enabled=on,
+clicks=4, bars=0, subdivision=off, bpm unset→120, CLICK, volume 1.0; T04 swaps the
+source), `CountInClicker.kt` (interface + `TrackCountInClicker` over `ClickTrack`,
+burst runs in viewModelScope, `stop()` releases the AudioTrack mid-burst),
+`CountInController.kt` (`Idle → Counting(n…1) → Go`; `CountInTriggers` ε=100 ms;
+`CountInPlayer` surface; `StateFlow<CountInState>` carries tick index, count,
+period/speed, per-tick wall instants + resume instant for T03).
+VM wiring: triggers (a)/(c) in `togglePlayPause` (ENDED-replay counts at 00:00 via
+forced pos=0 — `seekTo` posts async), (b) in the `seamEvents` collector awaiting the
+loop-seek settle; cancels on transport/seek/loop-off/track-open/release/background;
+decision-7 intent recompute subscription + `counting` flag in the player listener
+and frame-step gate.
+
+**Decision-A realization:** one additive T01 delta — `ClickTrack.playBurst` gained
+`onStart: (Long) -> Unit = {}` firing at the real `play()` (default no-op; no
+prepare/play split, spike call sites unchanged). Ticks and the resume both anchor to
+the *actual* burst start, so prep lateness shifts them together (unit-proven:
+`prepLatenessShiftsClicksAndResumeTogether`, `twentyConsecutiveSeamCountsShareOneSchedule`).
+
+**On-device results:**
+- **P4-1:** play from 00:00 → `count start trigger=PLAY_AT_0000 n=4
+  wallPeriod=500.0ms` → `count done: resumed on tick 4/4`; tap→resume 1567 ms
+  = 64 ms prep + 1500 ms schedule (exact). Prep lateness over every run:
+  **43–86 ms** — the ≤~50 ms first-tick budget is essentially met, so **no
+  pre-build is needed** (T01's 480–800 ms figure was the cold path).
+- **P4-2 soak:** **33/33 seam counts** each `resumed on tick 4/4`, zero missed
+  seams (33 `loop seam` events = 33 counts). Owner: freeze → 4 clicks → music
+  from A on every seam, no audible desync. Cancel: `count cancel:
+  reason=TRANSPORT tickIndex=1`, stays paused at the anchor showing Play; next
+  tap runs a fresh count.
+- **Frozen frame:** screencap diffs taken *inside* a count are pixel-identical
+  across the app (only the MIUI status-bar clock moves; the video's black→frame
+  transition is a one-time async first-frame render after a seek, not playback).
+- **Speed:** owner heard the 0.5× count at double length; unit: `wallPeriod=1000ms`,
+  resume at +3000 ms.
+- **Trigger (c):** `trigger=PLAY_AT_LOOP_A anchorMedia=20286ms` → resumed 4/4;
+  negative mid-passage play → no count (decision 4 ✓). Rotation mid-count:
+  count continues, no crash. Home mid-count: clicks stop (background cancel),
+  reopen → paused at the anchor.
+- **Owner feel (headphones):** count "feels immediate", clicks audible and
+  comfortable; the musical "+1" alignment isn't ear-judgeable without a tempo
+  reference — mechanical alignment is log-proven; real-practice sign-off at T06.
+
+**Bug found & fixed on device:** seam counts could anchor *pre-seek*
+(`anchorMedia=30272ms` = B, 16/19 anchors were B+poll-overrun): `LoopController`'s
+`tryEmit` resumes the collector INLINE (`Main.immediate`) **before** `pollLoop`
+issues `seekToA`, so `pendingSeek.inFlight` read false and the pre-seek position was
+used (the seek still landed during count prep, masking it visually). Fix: `delay(1)`
+in the collector before awaiting the settle — seek posted, then awaited. Re-verified:
+**8/8 seams anchored at the identical settled-A** (`10828ms`), all resumed 4/4.
+
+**In-session decisions:** seam count starts **after** the seek settles (per How, now
+actually enforced by the fix above); background pause cancels the count (preserves
+Phase 1's no-background-audio invariant — MediaSession is Ph7); `Go` persists until
+the next `start` (a synchronous `Go→Idle` would be conflated away from T03);
+frame-step is refused during a count (intent gate). Infra: `isReturnDefaultValues=true`
+added to unit tests (controller logs via `android.util.Log`).
+
+**Deferred:** bars/clicks/subdivision/BPM/click sound-volume stay hardcoded until
+T04/T05 (math fully unit-tested; on-device count-off parity needs the T05 toggle);
+the extreme burst (4 bars @ 60 BPM @ 0.5× ≈ 64 s static buffer) is unreachable
+without the settings screen — re-check at T05/T06. R2 latency/nudge findings for
+`04-risks.md` remain T06's job (prep-lateness data above feeds it).
 
 ## T03 — Count-in overlay + visual sync
 

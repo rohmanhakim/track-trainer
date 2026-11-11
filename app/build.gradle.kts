@@ -51,6 +51,9 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            // CountInController logs via android.util.Log for on-device verification;
+            // plain JUnit tests must get no-op defaults instead of "not mocked" throws.
+            isReturnDefaultValues = true
         }
     }
 

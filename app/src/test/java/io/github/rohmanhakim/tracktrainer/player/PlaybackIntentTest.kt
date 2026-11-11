@@ -27,4 +27,14 @@ class PlaybackIntentTest {
         // P1 regression guard: "Play" after the end must replay from the top.
         assertFalse(isPlayingIntent(playWhenReady = true, playbackState = Player.STATE_ENDED))
     }
+
+    @Test
+    fun countingShowsPauseEvenWhileFrozen() {
+        // Decision 7 (T02): a count pauses the player on purpose — the intent must
+        // stay armed so the transport shows Pause (tap cancels) and keep-screen-on holds.
+        assertTrue(isPlayingIntent(playWhenReady = false, playbackState = Player.STATE_READY, counting = true))
+        assertTrue(isPlayingIntent(playWhenReady = true, playbackState = Player.STATE_READY, counting = true))
+        // Cancelled count: back to the paused truth.
+        assertFalse(isPlayingIntent(playWhenReady = false, playbackState = Player.STATE_READY, counting = false))
+    }
 }

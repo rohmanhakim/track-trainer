@@ -32,7 +32,12 @@ speed control, A-B loop, animated count-in, tap-tempo metronome, volume boost.
   30/60 fps frame step. Exit sweep found & fixed a Phase-2-era regression: LOCAL
   playback had been routed through the HTTP-only cache pipeline (`06ef560`).
   `docs/tasks/phase-3.md` — T01–T05 all `done`.
-- **Next:** `docs/03-roadmap.md` Phase 4 — Count-in. Groom `docs/tasks/phase-4.md` before starting.
+- **Phase 4 in progress** (started 2026-11-11): Count-in. `docs/tasks/phase-4.md`
+  groomed (T01–T06). **T01 done** — click engine: PCM synthesis, standalone
+  `AudioTrack` absolute-time scheduler, output-latency probe (gate-ready). **T02
+  done** — `countin/` state machine: triggers, freeze/resume/cancel, decision-7
+  intent, on-device verified (33-seam soak + 8/8 post-fix A-anchors; prep lateness
+  43–86 ms — pre-build not needed). Next: **T03** (overlay).
 - Then follow `docs/03-roadmap.md`: one phase at a time, stories + acceptance
   criteria, Definition of Done applies (§10).
 

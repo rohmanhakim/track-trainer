@@ -59,6 +59,10 @@ class ClickTrack(
     /**
      * Plays [ticks] anchored at [anchorWallNanos] and measures what happened.
      * Cancelling the calling coroutine releases the track mid-burst.
+     *
+     * [onStart] fires with the actual `play()` instant (T02 decision A): buffer prep
+     * precedes it, so callers that must align other audio to the *heard* ticks — the
+     * count-in's resume — anchor to this, not to the nominal anchor. Default no-op.
      */
     suspend fun playBurst(
         ticks: List<ClickSchedule.Tick>,
@@ -67,6 +71,7 @@ class ClickTrack(
         playbackSpeed: Float,
         sound: ClickSound,
         volume: Float,
+        onStart: (Long) -> Unit = {},
     ): BurstMeasurement {
         require(ticks.isNotEmpty()) { "ticks must not be empty" }
         val scheduled = ticks.map {
@@ -96,6 +101,7 @@ class ClickTrack(
                 awaitDeadline(anchorWallNanos)
                 track.play()
                 val playAt = clockNanos()
+                onStart(playAt)
                 val startLatenessMs = ((playAt - anchorWallNanos) / 1e6).toFloat()
                 Log.d(logTag, "burst started: frames=$totalFrames start=+${"%.1f".format(startLatenessMs)}ms")
                 val measurements = ticks.mapIndexed { i, tick ->

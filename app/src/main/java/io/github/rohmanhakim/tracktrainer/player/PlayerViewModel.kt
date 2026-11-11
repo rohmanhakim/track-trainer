@@ -21,6 +21,14 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.rohmanhakim.tracktrainer.cache.CacheBookkeeper
 import io.github.rohmanhakim.tracktrainer.cache.CacheKeyFactory
+import io.github.rohmanhakim.tracktrainer.countin.CountCancelReason
+import io.github.rohmanhakim.tracktrainer.countin.CountInConfig
+import io.github.rohmanhakim.tracktrainer.countin.CountInController
+import io.github.rohmanhakim.tracktrainer.countin.CountInPlayer
+import io.github.rohmanhakim.tracktrainer.countin.CountInTrigger
+import io.github.rohmanhakim.tracktrainer.countin.CountInTriggers
+import io.github.rohmanhakim.tracktrainer.countin.HardcodedCountInConfig
+import io.github.rohmanhakim.tracktrainer.countin.TrackCountInClicker
 import io.github.rohmanhakim.tracktrainer.data.local.LoopPoint
 import io.github.rohmanhakim.tracktrainer.data.local.Preset
 import io.github.rohmanhakim.tracktrainer.data.local.SourceType
@@ -40,6 +48,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -136,6 +145,29 @@ class PlayerViewModel @Inject constructor(
     private var applyingPreset = false
     /** Last user-authored seek target until the player confirms it landed. */
     private val pendingSeek = PendingSeek()
+    /** T02: phase-4 defaults; T04 swaps this for the track's Preset-backed source. */
+    private val countInConfig: CountInConfig = HardcodedCountInConfig()
+
+    /**
+     * Count-in engine (P4-1/P4-2): boundary-anchored state machine over the T01 click
+     * engine. Player/speed are read lazily like [loopController], so it survives
+     * player rebuilds (rotation) and re-targets each fresh ExoPlayer.
+     */
+    private val countIn = CountInController(
+        scope = viewModelScope,
+        clicker = TrackCountInClicker(viewModelScope),
+        player = object : CountInPlayer {
+            override fun pause() {
+                _player.value?.pause()
+            }
+
+            override fun play() {
+                _player.value?.play()
+            }
+        },
+        config = { countInConfig },
+        playbackSpeed = { currentSpeed },
+    )
 
     init {
         // Log every loop seam so P3-2 deviation can be measured on-device via logcat.
@@ -146,6 +178,22 @@ class PlayerViewModel @Inject constructor(
                     "loop seam: boundary=${event.boundaryPositionMs} ms " +
                         "overrun=${event.overrunMs} ms → seekTo A=${event.seekToMs} ms",
                 )
+                // T02 trigger (b): count before A on every seam restart. In-session
+                // decision (phase-4 T02 "How"): the count starts AFTER the seam's
+                // seek-to-A settles — freeze on the real restart frame, then count.
+                if (!countIn.isEnabled || countIn.isCounting) return@collect
+                // LoopController.tryEmit can resume this collector INLINE
+                // (Main.immediate on main) — before pollLoop issues seekToA; observed
+                // on the Redmi: seam counts anchored at B (30272 ms) instead of A.
+                // Yield once so the seek is posted, then wait for its settle, so the
+                // count freezes on A's frame (in-session decision: AFTER the seek).
+                delay(1)
+                if (!awaitLoopSeekSettled()) return@collect
+                val player = _player.value ?: return@collect
+                // The owner may have paused (or disarmed the loop) while the seek was
+                // settling — then plain Phase-3 seam behaviour continues, no count.
+                if (!player.playWhenReady || !loopController.state.value.loopEnabled) return@collect
+                countIn.start(CountInTrigger.LOOP_SEAM, player.currentPosition)
             }
         }
         // Reflect loop controller state (A/B, loop on/off, active point) in the UI.
@@ -154,7 +202,38 @@ class PlayerViewModel @Inject constructor(
                 _uiState.update { it.copy(loopState = state) }
             }
         }
+        // Decision 7: intent/keep-screen-on must read "playing" for the whole count —
+        // the player listener only fires on player events, so a count state change
+        // (start, resume, cancel) recomputes it here; both paths agree because they
+        // pass the same counting flag.
+        viewModelScope.launch {
+            countIn.state.collect {
+                val player = _player.value
+                _uiState.update { ui ->
+                    ui.copy(
+                        isPlayingIntent = isPlayingIntent(
+                            playWhenReady = player?.playWhenReady ?: false,
+                            playbackState = player?.playbackState ?: Player.STATE_IDLE,
+                            counting = countIn.isCounting,
+                        ),
+                    )
+                }
+            }
+        }
     }
+
+    /**
+     * Waits for the loop's in-flight seek-to-A to land (T02 trigger (b)); false on
+     * timeout — playback then continues count-less rather than hanging the seam.
+     * Callers must delay/yield first: an inline-resumed collector can otherwise see
+     * `inFlight == false` before pollLoop has even posted the seek (see the seam
+     * collector) and read the pre-seek position.
+     */
+    private suspend fun awaitLoopSeekSettled(timeoutMs: Long = 500L): Boolean =
+        withTimeoutOrNull(timeoutMs) {
+            while (pendingSeek.inFlight) delay(10L)
+            true
+        } ?: false
 
     /**
      * Opens a track and starts playback. Idempotent for the current track: the screen's
@@ -162,6 +241,9 @@ class PlayerViewModel @Inject constructor(
      */
     fun openTrack(trackId: Long) {
         if (trackId == openedTrackId && _player.value != null) return
+        // T02 cancel list: switching tracks aborts any count (rotation re-entry
+        // returns above, so a mid-count rotation never cancels).
+        countIn.cancel(CountCancelReason.TRACK_OPEN)
         reextractAttempted = false
         loopPointsJob?.cancel()
         viewModelScope.launch {
@@ -231,20 +313,32 @@ class PlayerViewModel @Inject constructor(
     fun togglePlayPause() {
         val player = _player.value ?: return
         // Branch on intent, not isPlaying: a tap during the seam's transient buffering
-        // must pause, not silently keep playing.
-        if (isPlayingIntent(player.playWhenReady, player.playbackState)) {
+        // must pause, not silently keep playing. During a count the intent reads true
+        // (decision 7), so this branch is also the count's cancel path.
+        if (isPlayingIntent(player.playWhenReady, player.playbackState, countIn.isCounting)) {
+            countIn.cancel(CountCancelReason.TRANSPORT)
             player.pause()
             syncPositionFromPlayer(player)
         } else {
             // At STATE_ENDED playWhenReady is already true, so play() alone is a
             // no-op — restart explicitly so "Play" after the end replays from the top.
-            if (player.playbackState == Player.STATE_ENDED) seekTo(0L)
-            player.play()
+            val ended = player.playbackState == Player.STATE_ENDED
+            if (ended) seekTo(0L)
+            // T02 triggers (a)/(c): count first when starting from rest at 00:00 or
+            // exactly at an armed loop's A (decision 4); seekTo posts async, so trust
+            // the ENDED target over a stale currentPosition read.
+            val positionMs = if (ended) 0L else player.currentPosition
+            val trigger = CountInTriggers.onPlayFromStopped(positionMs, loopController.state.value)
+            if (trigger == null || !countIn.start(trigger, positionMs)) {
+                player.play()
+            }
         }
     }
 
     fun seekTo(positionMs: Long) {
         val player = _player.value ?: return
+        // T02 cancel list: a scrub aborts a running count (stays paused at the anchor).
+        countIn.cancel(CountCancelReason.SEEK)
         val durationMs = _uiState.value.durationMs
         val target = if (durationMs > 0L) {
             positionMs.coerceIn(0L, durationMs)
@@ -367,6 +461,8 @@ class PlayerViewModel @Inject constructor(
     /** Toggles loop repetition on/off (loop-until-off). */
     fun toggleLoop() {
         val s = loopController.state.value
+        // T02 cancel list: disarming the loop aborts a running count.
+        if (s.loopEnabled) countIn.cancel(CountCancelReason.LOOP_OFF)
         loopController.setLoopEnabled(!s.loopEnabled)
         schedulePresetSave()
     }
@@ -459,7 +555,8 @@ class PlayerViewModel @Inject constructor(
         val player = _player.value ?: return
         // Intent gate: player.isPlaying is transiently false during the seam seek's
         // buffering — a step tap in that window must not sneak a seek into a live loop.
-        if (isPlayingIntent(player.playWhenReady, player.playbackState)) return
+        // counting=true keeps the gate closed mid-count too (a frozen frame isn't steppable).
+        if (isPlayingIntent(player.playWhenReady, player.playbackState, countIn.isCounting)) return
         val durationMs = _uiState.value.durationMs
         // The displayed playhead, not player.currentPosition: while the previous step's
         // seek is in flight the player still reports the pre-seek position, so rapid taps
@@ -477,6 +574,10 @@ class PlayerViewModel @Inject constructor(
 
     /** Pause without tearing down — used when the app leaves the foreground. */
     fun pause() {
+        // T02: leaving the foreground aborts a count — clicks are app audio, and the
+        // count would otherwise resume playback into the background (Phase 1's
+        // no-background-audio invariant; MediaSession is Phase 7).
+        countIn.cancel(CountCancelReason.BACKGROUND)
         _player.value?.let { player ->
             player.pause()
             syncPositionFromPlayer(player)
@@ -485,6 +586,7 @@ class PlayerViewModel @Inject constructor(
 
     /** Back-navigation teardown: stop audio and free the player; a later open builds fresh. */
     fun releasePlayer() {
+        countIn.cancel(CountCancelReason.RELEASE)
         releaseInternal()
         openedTrackId = null
         _uiState.value = PlayerUiState(isLoading = false)
@@ -542,7 +644,10 @@ class PlayerViewModel @Inject constructor(
             override fun onPlayerStateChanged(playWhenReady: Boolean, state: Int) {
                 // Intent, not isPlaying: the seam seek's transient buffering must not
                 // flip the transport button to "Play" (the loop-seam blink bug).
-                _uiState.update { it.copy(isPlayingIntent = isPlayingIntent(playWhenReady, state)) }
+                // counting (T02 decision 7) keeps it armed while frozen on the anchor.
+                _uiState.update {
+                    it.copy(isPlayingIntent = isPlayingIntent(playWhenReady, state, countIn.isCounting))
+                }
                 if (state == Player.STATE_ENDED) {
                     // Whole stream has flowed through the cache: offline replay is now
                     // guaranteed (P2-3) and the dot can show in the library.
